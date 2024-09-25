@@ -1,0 +1,4 @@
+port: 3001 # Puerto de salida
+database: "mongodb+srv://proyect:GwDSv0V6zQsMOTw3@proyectot.bbfwcnw.mongodb.net/" #Conexion a la bd
+dbname: "mybd" # Nombre de la bd
+key : "Validator me arruino la vida :c " #string de 32 caracteres para cifrado
