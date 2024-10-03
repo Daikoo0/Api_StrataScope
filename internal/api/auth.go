@@ -8,6 +8,7 @@ import (
 	"github.com/ProyectoT/api/encryption"
 	"github.com/ProyectoT/api/internal/api/dtos"
 	"github.com/ProyectoT/api/internal/service"
+	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
 )
 
@@ -23,17 +24,28 @@ func (a *API) RegisterUser(c echo.Context) error {
 
 	err = a.dataValidator.Struct(params)
 	if err != nil {
+		if validationErrors, ok := err.(validator.ValidationErrors); ok {
+			for _, fieldError := range validationErrors {
+				switch fieldError.Field() {
+				case "Password":
+					return c.JSON(http.StatusBadRequest, responseMessage{Message: "Password must be at least 8 characters long"}) // HTTP 400 Bad Request
+
+				default:
+					return c.JSON(http.StatusBadRequest, responseMessage{Message: "required field missing: " + fieldError.Field()}) // HTTP 400 Bad Request
+				}
+			}
+		}
 		return c.JSON(http.StatusBadRequest, responseMessage{Message: err.Error()})
 	}
 
 	if params.Password != params.PasswordConfirm {
-		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Passwords do not match"}) // HTTP 400 Bad Request
+		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Password does not match"}) // HTTP 400 Bad Request
 	}
 
 	err = a.serv.RegisterUser(ctx, params.Email, params.Name, params.LastName, params.Password)
 	if err != nil {
 		if err == service.ErrUserAlreadyExists {
-			return c.JSON(http.StatusConflict, responseMessage{Message: "User already exists"}) // HTTP 409 Conflict
+			return c.JSON(http.StatusBadRequest, responseMessage{Message: "Email already exists"}) // HTTP 409 Conflict
 		}
 
 		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Internal server error"}) // HTTP 500 Internal Server Error
@@ -44,33 +56,34 @@ func (a *API) RegisterUser(c echo.Context) error {
 
 // LoginUser recibe un email y una contraseña, y devuelve un token de autenticación enviado en una cookie
 func (a *API) LoginUser(c echo.Context) error {
-	ctx := c.Request().Context() // Context.Context es una interfaz que permite el paso de valores entre funciones
+	ctx := c.Request().Context()
 	params := dtos.LoginUser{}
 
 	err := c.Bind(&params) // llena a params con los datos de la solicitud
 
-	// Sin error  == nil - Con error != nil
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Invalid request"})
-		//return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"}) //HTTP 400 Bad Request
 	}
 
 	err = a.dataValidator.Struct(params) // valida los datos de la solicitud
+
 	if err != nil {
-		//log.Println(err)
 		return c.JSON(http.StatusBadRequest, responseMessage{Message: err.Error()}) // HTTP 400 Bad Request
 	}
 
 	u, err := a.serv.LoginUser(ctx, params.Email, params.Password) // OBJID, email, name
 	if err != nil {
-		//log.Println(err)
-		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Invalid Credentials"})
+		if err == service.ErrInvalidCredentials {
+			return c.JSON(http.StatusUnauthorized, responseMessage{Message: "user or password incorrect"}) // HTTP 401
+		}
+
+		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Internal Server Error"}) // HTTP 500
+
 	}
 
-	token, err := encryption.SignedLoginToken(u) // Genera el token con los datos del usuario (OBJID, email, name)
+	token, err := encryption.SignedLoginToken(u) // Genera el token
 	if err != nil {
-		//log.Println(err)
-		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Internal server error"}) // HTTP 500 Internal Server Error
+		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Internal Server Error"}) // HTTP 500
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"token": token}) // HTTP 200 OK

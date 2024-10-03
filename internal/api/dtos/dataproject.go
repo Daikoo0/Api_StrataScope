@@ -87,6 +87,11 @@ type UserEditingState struct {
 	Name    string `json:"name"`
 }
 
+type Drop struct {
+	ActiveId int `json:"activeId"`
+	OverId   int `json:"overId"`
+}
+
 type Facie struct {
 	Facie string `json:"facie"`
 }

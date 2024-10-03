@@ -29,7 +29,7 @@ func (a *API) Start(e *echo.Echo, address string) error {
 	a.RegisterRoutes(e)
 
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins:     []string{"http://localhost:*", "http://127.0.0.1:*", "https://columnasgeo.inf.uct.cl", "http://localhost*"},
+		AllowOrigins:     []string{"http://localhost:*", "http://127.0.0.1:*", "https://stratascope.inf.uct.cl", "http://localhost*"},
 		AllowMethods:     []string{echo.GET, echo.POST, echo.DELETE},
 		AllowHeaders:     []string{echo.HeaderContentType, echo.HeaderAuthorization},
 		AllowCredentials: true,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"crypto/rand"
 	"encoding/hex"
@@ -40,6 +41,7 @@ type ProjectResponse struct {
 }
 
 type RoomData struct {
+	mu              sync.Mutex
 	ID              primitive.ObjectID
 	ProjectInfo     models.ProjectInfo
 	Data            []models.DataInfo
@@ -297,6 +299,8 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						}
 					}()
 				}
+
+				proyect.mu.Lock()
 				switch dataMap.Action {
 
 				case "undo":
@@ -305,9 +309,9 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 				case "redo":
 					redo(proyect)
 
-				case "tokenLink":
+				case "deletetokenLink":
 
-					tokenLink(conn, roomID, user, proyect)
+					removeSharedPass(proyect)
 
 				case "generateTokenLink":
 
@@ -394,6 +398,25 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 							},
 							Undo: func() {
 								deleteRow(proyect, dtos.Delete{RowIndex: addData.RowIndex})
+							},
+						},
+					)
+				case "drop":
+					var drop dtos.Drop
+					err := json.Unmarshal(dataMap.Data, &drop)
+					if err != nil {
+						log.Println("Error al deserializar: ", err)
+					}
+					activeId := drop.ActiveId
+					overId := drop.OverId
+
+					performAction(proyect,
+						Action{
+							Execute: func() {
+								layerDrop(proyect, activeId, overId)
+							},
+							Undo: func() {
+								layerDrop(proyect, overId, activeId)
 							},
 						},
 					)
@@ -727,7 +750,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 					sendSocketMessage(msgData, proyect, "columns")
 
 				}
-
+				proyect.mu.Unlock()
 			} else {
 				errMessage := "Error: Don't have permission to edit this document"
 				conn.WriteMessage(websocket.TextMessage, []byte(errMessage))
@@ -1019,6 +1042,22 @@ func editFosil(project *RoomData, id string, newFosil models.Fosil) {
 
 }
 
+func layerDrop(project *RoomData, activeId int, overId int) {
+
+	roomData := project.Data
+
+	roomData[activeId], roomData[overId] = roomData[overId], roomData[activeId]
+
+	msgData := map[string]interface{}{
+		"action":   "drop",
+		"activeId": activeId,
+		"overId":   overId,
+	}
+
+	sendSocketMessage(msgData, project, "drop")
+
+}
+
 func addFacie(project *RoomData, facie dtos.Facie, sections []models.FaciesSection) {
 
 	name := facie.Facie
@@ -1141,50 +1180,18 @@ func contains(slice []string, value string) bool {
 }
 
 func generateTokenLink(conn *websocket.Conn, roomID string, user string, proyect *RoomData) {
-
-	storedpass, err := generateRandomPass(8)
-	if err != nil {
-		log.Println("Error generando contraseña aleatoria: ", err)
-		return
-	}
-
-	editorToken, err := encryption.InviteToken(roomID, "editors", storedpass)
-	if err != nil {
-		log.Println("Error generando token de editor: ", err)
-		return
-	}
-
-	readerToken, err := encryption.InviteToken(roomID, "readers", storedpass)
-	if err != nil {
-		log.Println("Error generando token de lector: ", err)
-		return
-	}
-
-	proyect.Shared.Pass = storedpass
-
-	msgData := map[string]interface{}{
-		"action": "tokenLink",
-		"editor": editorToken,
-		"reader": readerToken,
-	}
-
-	shareproyect, err := json.Marshal(msgData)
-	if err != nil {
-		log.Println("Error al serializar mensaje:", err)
-	}
-
-	if user == proyect.ProjectInfo.Members.Owner {
-		conn.WriteMessage(websocket.TextMessage, shareproyect)
-	}
-
-}
-
-func tokenLink(conn *websocket.Conn, roomID string, user string, proyect *RoomData) {
 	if user == proyect.ProjectInfo.Members.Owner {
 
 		storedpass := proyect.Shared.Pass
 		if storedpass == "" {
-			return
+			var err error
+			storedpass, err = generateRandomPass(8)
+			if err != nil {
+				log.Println("Error generando contraseña aleatoria: ", err)
+				return
+			}
+
+			proyect.Shared.Pass = storedpass
 		}
 
 		editorToken, err := encryption.InviteToken(roomID, "editors", storedpass)
@@ -1212,7 +1219,10 @@ func tokenLink(conn *websocket.Conn, roomID string, user string, proyect *RoomDa
 
 		conn.WriteMessage(websocket.TextMessage, shareproyect)
 	}
+}
 
+func removeSharedPass(proyect *RoomData) {
+	proyect.Shared.Pass = ""
 }
 
 func (a *API) ValidateInvitation(c echo.Context) error {
