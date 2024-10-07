@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"crypto/rand"
@@ -37,7 +38,9 @@ type GeneralMessage struct {
 }
 
 type ProjectResponse struct {
-	Projects []models.InfoProject `json:"projects"`
+	Projects    []models.InfoProject `json:"projects"`
+	CurrentPage int                  `json:"currentPage"`
+	TotalPages  int                  `json:"totalPages"`
 }
 
 type RoomData struct {
@@ -54,12 +57,11 @@ type RoomData struct {
 	UserColors      map[string]string
 	undoStack       []Action
 	redoStack       []Action
+	saveTimer       *time.Timer
+	actionsCounter  int
 }
 
 var rooms = make(map[string]*RoomData)
-
-var roomTimers = make(map[string]*time.Timer)
-var roomActions = make(map[string]int)
 
 var roomActionsThreshold = 10
 
@@ -244,63 +246,60 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 
 				if dataMap.Action != "editingUser" && dataMap.Action != "deleteEditingUser" && dataMap.Action != "columns" {
 					go func() {
-						// Bloquear acceso al mapa de timers para evitar condiciones de carrera
-						a.saveMutex.Lock()
-						defer a.saveMutex.Unlock()
+						proyect.mu.Lock()
+						saveTimer := proyect.saveTimer
+						actionsCounter := proyect.actionsCounter
+						proyect.mu.Unlock()
 
-						// Verificar si ya hay un timer activo para esta sala
-						if timer, exists := roomTimers[roomID]; exists {
-
-							if roomActions[roomID] >= roomActionsThreshold {
-
-								// Función de guardado
-								err = a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Shared: proyect.Shared})
+						if saveTimer != nil {
+							if actionsCounter >= roomActionsThreshold {
+								// Guardado fuera del lock
+								err := a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Shared: proyect.Shared})
 								if err != nil {
-									log.Println("Error guardando la sala automáticamente: ", err)
+									log.Println("Error guardando el proyecto automáticamente: ", err)
 								} else {
-									log.Println("Sala guardada: ", roomID)
+									log.Println("Proyecto guardado: ", proyect.ID)
 								}
 
-								roomActions[roomID] = 0
+								proyect.mu.Lock()
+								proyect.actionsCounter = 0
+								proyect.mu.Unlock()
 
-								//salir de la funcion
 								return
 							}
 
-							log.Println("Reiniciando el timer: ", roomID)
-							log.Println("Acciones: ", roomActions[roomID])
-							timer.Reset(5 * time.Second)
-							roomActions[roomID]++
+							saveTimer.Reset(5 * time.Second)
 
+							proyect.mu.Lock()
+							proyect.actionsCounter++
+							proyect.mu.Unlock()
 						} else {
-							// Si no hay un timer, se crea uno
-							log.Println("Creando un nuevo timer: ", roomID)
-							timer := time.NewTimer(5 * time.Second)
-							roomTimers[roomID] = timer
+							proyect.mu.Lock()
+							proyect.saveTimer = time.NewTimer(5 * time.Second)
+							proyect.actionsCounter = 1
+							proyect.mu.Unlock()
 
 							go func() {
-								<-timer.C
+								<-proyect.saveTimer.C
 
-								// Función de guardado
-								if rooms[roomID] != nil {
-									err = a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Shared: proyect.Shared})
-									if err != nil {
-										log.Println("Error guardando la sala automáticamente: ", err)
-									} else {
-										log.Println("Sala guardada: ", roomID)
-									}
+								// Guardado fuera del lock
+								err := a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Shared: proyect.Shared})
+								if err != nil {
+									log.Println("Error guardando el proyecto automáticamente: ", err)
+								} else {
+									log.Println("Proyecto guardado: ", proyect.ID)
 								}
 
-								// Eliminar el timer del mapa una vez que la sala ha sido guardada
-								a.saveMutex.Lock()
-								delete(roomTimers, roomID)
-								a.saveMutex.Unlock()
+								proyect.mu.Lock()
+								proyect.saveTimer = nil
+								proyect.mu.Unlock()
 							}()
 						}
 					}()
 				}
 
 				proyect.mu.Lock()
+
 				switch dataMap.Action {
 
 				case "undo":
@@ -764,6 +763,11 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 	return nil
 }
 
+// solicitud http para mostrar la cantidad de goroutines
+func (a *API) HandleGoroutines(c echo.Context) error {
+	return c.String(http.StatusOK, fmt.Sprintf("Número total de goroutines: %d", runtime.NumGoroutine()))
+}
+
 func sendSocketMessage(msgData map[string]interface{}, proyect *RoomData, action string) {
 
 	jsonMsg, err := json.Marshal(msgData)
@@ -788,7 +792,7 @@ func (a *API) instanceRoom(ctx context.Context, roomID string) *RoomData {
 		return existingRoom
 	}
 
-	room, err := a.serv.GetRoom(ctx, roomID)
+	room, err := a.repo.GetRoom(ctx, roomID)
 	if err != nil {
 		return nil
 	}
@@ -1227,21 +1231,11 @@ func removeSharedPass(proyect *RoomData) {
 
 func (a *API) ValidateInvitation(c echo.Context) error {
 
-	ctx := c.Request().Context()
-	log.Println("Validando invitación")
-
-	// Revisar Token de autenticación
-	auth := c.Request().Header.Get("Authorization")
-	if auth == "" {
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-	}
-	claimsAuth, err := encryption.ParseLoginJWT(auth)
+	ctx, claimsAuth, err := a.getContextAndClaims(c)
 	if err != nil {
-		log.Println(err)
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
+		return err
 	}
 
-	// Revisar Token de Invitación
 	var requestBody struct {
 		Token string `json:"token"`
 	}

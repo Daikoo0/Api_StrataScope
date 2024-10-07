@@ -18,9 +18,6 @@ type Service interface {
 	GetRoom(ctx context.Context, roomName string) (*models.Project, error)
 	CreateRoom(ctx context.Context, roomName string, name string, correo string, desc string, location string, lat float64, long float64, visible bool) error
 
-	// Profile - profile.service.go
-	GetProyects(ctx context.Context, user string) ([]models.InfoProject, error)
-
 	// Auth - auth.service.go
 	RegisterUser(ctx context.Context, email, name, lastname, password string) error
 	LoginUser(ctx context.Context, email, password string) (*models.User, error)

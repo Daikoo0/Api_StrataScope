@@ -26,7 +26,7 @@ type Repository interface { //comunicaciones con la base de datos
 	DeleteProject(ctx context.Context, roomID string) error                                                                                                   // Elimina un proyecto                                                                                                // Elimina un proyecto                                                                                                    // Elimina una sala de la base de datos
 
 	// Profile - profile.repository.go
-	GetProyects(ctx context.Context, email string) ([]models.InfoProject, error) // Devuelve los proyectos de un usuario
+	GetProyects(ctx context.Context, email string, page int, limit int) ([]models.InfoProject, int, int, error) // Devuelve los proyectos de un usuario
 	//GetPermission(ctx context.Context, correo string, proyectID string) (int, error)
 	HandleGetPublicProject(ctx context.Context) ([]models.InfoProject, error) // Devuelve los proyectos publicos
 

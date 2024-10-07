@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/ProyectoT/api/encryption"
 	"github.com/ProyectoT/api/internal/api/dtos"
@@ -11,96 +13,74 @@ import (
 )
 
 func (a *API) AddComment(c echo.Context) error {
-	ctx := c.Request().Context() // Context.Context es una interfaz que permite el paso de valores entre funciones
+	ctx := c.Request().Context()
 	params := models.Comment{}
 
-	err := c.Bind(&params) // llena a params con los datos de la solicitud
-
-	// Sin error  == nil - Con error != nil
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Invalid request"})
+	if err := c.Bind(&params); err != nil {
+		return a.handleError(c, http.StatusBadRequest, "Invalid request")
 	}
 
-	err = a.repo.HandleAddComment(ctx, params)
-	if err != nil {
+	if err := a.repo.HandleAddComment(ctx, params); err != nil {
 		log.Println(err)
-		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Invalid Credentials"})
+		return a.handleError(c, http.StatusInternalServerError, "Invalid Credentials")
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"success": "true"}) // HTTP 200 OK
+	return c.JSON(http.StatusOK, map[string]string{"success": "true"})
 }
 
 func (a *API) projects(c echo.Context) error {
-
-	ctx := c.Request().Context()
-	auth := c.Request().Header.Get("Authorization")
-
-	//validar datos
-	if auth == "" {
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-	}
-
-	claims, err := encryption.ParseLoginJWT(auth)
+	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
-		log.Println(err)
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: err.Error()})
+		return err
 	}
 
 	user := claims["email"].(string)
 
-	proyects, err := a.serv.GetProyects(ctx, user)
+	page, err := strconv.Atoi(c.QueryParam("page"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+
+	limit, err := strconv.Atoi(c.QueryParam("limit"))
+	if err != nil || limit < 1 {
+		limit = 5
+	}
+
+	proyects, currentPage, totalPages, err := a.repo.GetProyects(ctx, user, page, limit)
 	if err != nil {
-		log.Println(err)
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Error getting proyects"})
+		return a.handleError(c, http.StatusUnauthorized, "Error getting projects")
 	}
 
 	response := ProjectResponse{
-		Projects: proyects,
+		Projects:    proyects,
+		CurrentPage: currentPage,
+		TotalPages:  totalPages,
 	}
-
-	// Devolver la respuesta JSON con los proyectos
 	return c.JSON(http.StatusOK, response)
 }
 
 func (a *API) HandleCreateProyect(c echo.Context) error {
 
-	ctx := c.Request().Context()
-
-	auth := c.Request().Header.Get("Authorization")
-	if auth == "" {
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-	}
-
-	// Si existe, revisa si es valido
-	claims, err := encryption.ParseLoginJWT(auth)
+	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
-		log.Println(err)
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
+		return err
 	}
 
 	correo := claims["email"].(string)
 	name := claims["name"].(string)
-	log.Println(correo)
-	log.Println(name)
 
 	var params dtos.Project
 
-	err = c.Bind(&params) // llena a params con los datos de la solicitud
-
-	log.Print(params)
-
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Invalid request"})
+	if err := c.Bind(&params); err != nil {
+		return a.handleError(c, http.StatusBadRequest, "Invalid request")
 	}
 
-	err = a.dataValidator.Struct(params) // valida los datos de la solicitud
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, responseMessage{Message: err.Error()}) // HTTP 400 Bad Request
+	if err := a.dataValidator.Struct(params); err != nil {
+		return a.handleError(c, http.StatusBadRequest, err.Error())
 	}
 
-	err = a.serv.CreateRoom(ctx, params.RoomName, name, correo, params.Desc, params.Location, params.Lat, params.Long, params.Visible)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Failed to create a room"})
+	if err = a.serv.CreateRoom(ctx, params.RoomName, name, correo, params.Desc, params.Location, params.Lat, params.Long, params.Visible); err != nil {
+		return a.handleError(c, http.StatusInternalServerError, "Failed to create a room")
 	}
 
 	return c.JSON(http.StatusOK, responseMessage{Message: "Room created successfully"})
@@ -108,71 +88,94 @@ func (a *API) HandleCreateProyect(c echo.Context) error {
 
 func (a *API) DeleteProject(c echo.Context) error {
 
-	ctx := c.Request().Context()
-
-	auth := c.Request().Header.Get("Authorization")
-	if auth == "" {
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-	}
-
-	// Parsear el token de autenticación
-	claims, err := encryption.ParseLoginJWT(auth)
+	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
-		log.Println(err)
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
+		return err
 	}
 
 	user := claims["email"].(string)
 	id := c.Param("id")
 
-	// Revisar si la sala ya está en memoria
 	existingRoom, exists := rooms[id]
 	if exists {
-		// Si la sala está en memoria, acceder a los miembros directamente
 		if existingRoom.ProjectInfo.Members.Owner != user {
 
 			existingRoom.ProjectInfo.Members.Editors = removeUser(existingRoom.ProjectInfo.Members.Editors, user)
 			existingRoom.ProjectInfo.Members.Readers = removeUser(existingRoom.ProjectInfo.Members.Readers, user)
 
-			// Actualizar la sala en base de datos
 			err = a.repo.UpdateMembers(ctx, id, existingRoom.ProjectInfo.Members)
 			if err != nil {
-				return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Failed to delete user from room"})
+				return a.handleError(c, http.StatusInternalServerError, "Failed to delete user from room")
 			}
 
 		} else {
-			// Si el usuario es el dueño de la sala, eliminar el proyecto
 			err = a.repo.DeleteProject(ctx, id)
 			if err != nil {
-				return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Failed to delete room"})
+				return a.handleError(c, http.StatusInternalServerError, "Failed to delete room")
 			}
-			// También puedes eliminar la sala de la memoria
+
 			delete(rooms, id)
 		}
 	} else {
-		// Si la sala no está en memoria, consultarla desde la base de datos
 		proyect, err := a.repo.GetMembers(ctx, id)
 		if err != nil {
-			return c.JSON(http.StatusNotFound, responseMessage{Message: "Room not found"})
+			return a.handleError(c, http.StatusNotFound, "Room not found")
 		}
 
-		// Verificar si el usuario es dueño o no
 		if proyect.Owner != user {
-			// Eliminar al usuario de la sala en la base de datos
-			err = a.repo.DeleteUserRoom(ctx, user, id)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Failed to delete user from room"})
+			if err = a.repo.DeleteUserRoom(ctx, user, id); err != nil {
+				return a.handleError(c, http.StatusInternalServerError, "Failed to delete user from room")
 			}
 		} else {
-			// Eliminar el proyecto completo si el usuario es el dueño
-			err = a.repo.DeleteProject(ctx, id)
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Failed to delete room"})
+			if err = a.repo.DeleteProject(ctx, id); err != nil {
+				return a.handleError(c, http.StatusInternalServerError, "Failed to delete room")
 			}
 		}
 	}
 
 	return c.JSON(http.StatusOK, responseMessage{Message: "Room deleted successfully"})
+}
+
+func (a *API) HandleGetPublicProject(c echo.Context) error {
+
+	ctx := c.Request().Context()
+	auth := c.Request().Header.Get("Authorization")
+	if auth == "" {
+		return a.handleError(c, http.StatusUnauthorized, "Unauthorized")
+	}
+
+	proyects, err := a.repo.HandleGetPublicProject(ctx)
+	if err != nil {
+		return a.handleError(c, http.StatusUnauthorized, "Error getting proyects")
+	}
+
+	response := ProjectResponse{Projects: proyects}
+
+	return c.JSON(http.StatusOK, response)
+}
+
+func (a *API) HandleEditProfile(c echo.Context) error {
+	ctx, claims, err := a.getContextAndClaims(c)
+	if err != nil {
+		return err
+	}
+
+	email := claims["email"].(string)
+
+	var req dtos.EditProfileRequest
+	if err := c.Bind(&req); err != nil {
+		return a.handleError(c, http.StatusBadRequest, "Invalid request")
+	}
+
+	if err := a.dataValidator.Struct(req); err != nil {
+		return a.handleError(c, http.StatusBadRequest, err.Error())
+	}
+
+	if err = a.repo.UpdateUserProfile(ctx, req, email); err != nil {
+		return a.handleError(c, http.StatusInternalServerError, "Failed to update profile")
+	}
+
+	return c.JSON(http.StatusOK, responseMessage{Message: "Profile updated successfully"})
 }
 
 func removeUser(users []string, userToRemove string) []string {
@@ -184,129 +187,24 @@ func removeUser(users []string, userToRemove string) []string {
 	return users
 }
 
-func (a *API) HandleGetPublicProject(c echo.Context) error {
-
-	ctx := c.Request().Context()
+func (a *API) getContextAndClaims(c echo.Context) (ctx context.Context, claims map[string]interface{}, err error) {
+	ctx = c.Request().Context()
 	auth := c.Request().Header.Get("Authorization")
 	if auth == "" {
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
+		err = a.handleError(c, http.StatusUnauthorized, "Unauthorized")
+		return
 	}
 
-	proyects, err := a.repo.HandleGetPublicProject(ctx)
-	if err != nil {
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Error getting proyects"})
+	claims, parseErr := encryption.ParseLoginJWT(auth)
+	if parseErr != nil {
+		log.Println(parseErr)
+		err = a.handleError(c, http.StatusUnauthorized, "Unauthorized")
+		return
 	}
 
-	response := ProjectResponse{
-		Projects: proyects,
-	}
-
-	return c.JSON(http.StatusOK, response)
+	return
 }
 
-func (a *API) HandleEditProfile(c echo.Context) error {
-	ctx := c.Request().Context()
-	auth := c.Request().Header.Get("Authorization")
-
-	if auth == "" {
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-	}
-
-	claims, err := encryption.ParseLoginJWT(auth)
-	if err != nil {
-		log.Println(err)
-		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-	}
-
-	email := claims["email"].(string)
-
-	var req dtos.EditProfileRequest
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Invalid request"})
-	}
-
-	if err := a.dataValidator.Struct(req); err != nil {
-		return c.JSON(http.StatusBadRequest, responseMessage{Message: err.Error()})
-	}
-
-	err = a.repo.UpdateUserProfile(ctx, req, email)
-	if err != nil {
-		log.Println(err)
-		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Failed to update profile"})
-	}
-
-	return c.JSON(http.StatusOK, responseMessage{Message: "Profile updated successfully"})
+func (a *API) handleError(c echo.Context, statusCode int, message string) error {
+	return c.JSON(statusCode, responseMessage{Message: message})
 }
-
-// func (a *API) HandleInviteUser(c echo.Context) error {
-
-// 	ctx := c.Request().Context()
-// 	auth := c.Request().Header.Get("Authorization")
-
-// 	//validar datos
-// 	if auth == "" {
-// 		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-// 	}
-
-// 	claims, err := encryption.ParseLoginJWT(auth)
-// 	if err != nil {
-// 		log.Println(err)
-// 		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-// 	}
-
-// 	user := claims["email"].(string)
-// 	id := c.Param("id")
-
-// 	var newUser dtos.InviteUserRequest
-
-// 	err = c.Bind(&newUser) // llena a params con los datos de la solicitud
-
-// 	if err != nil {
-// 		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Invalid request"})
-// 		//return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"}) //HTTP 400 Bad Request
-// 	}
-
-// 	log.Print(newUser)
-
-// 	if newUser.Email == "" || newUser.Role == "0" {
-// 		return c.JSON(http.StatusBadRequest, responseMessage{Message: "Invalid request"})
-// 	}
-
-// 	//obtener el proyecto
-// 	proyect, err := a.serv.GetRoomInfo(ctx, id)
-// 	if err != nil {
-// 		return c.JSON(http.StatusNotFound, responseMessage{Message: "Room not found"})
-// 	}
-
-// 	//validar si el usuario tiene permisos
-// 	if proyect.Members.Owner != user {
-// 		return c.JSON(http.StatusUnauthorized, responseMessage{Message: "Unauthorized"})
-// 	}
-
-// 	//validar si el usuario ya esta en el proyecto dentro de Members[0], Members[1][array], Members[2][array]
-// 	if proyect.Members["0"] == newUser.Email {
-// 		return c.JSON(http.StatusBadRequest, responseMessage{Message: "User already in the project"})
-// 	}
-
-// 	members1 := proyect.Members["1"].(primitive.A)
-// 	members2 := proyect.Members["2"].(primitive.A)
-
-// 	for _, member := range members1 {
-// 		if member == newUser.Email {
-// 			return c.JSON(http.StatusBadRequest, responseMessage{Message: "User already in the project"})
-// 		}
-// 	}
-
-// 	for _, member := range members2 {
-// 		if member == newUser.Email {
-// 			return c.JSON(http.StatusBadRequest, responseMessage{Message: "User already in the project"})
-// 		}
-// 	}
-
-// 	err = a.repo.AddUserToProject(ctx, newUser.Email, newUser.Role, id)
-// 	if err != nil {
-// 		return c.JSON(http.StatusInternalServerError, responseMessage{Message: "Failed to invite user"})
-// 	}
-
-// 	return c.JSON(http.StatusOK, responseMessage{Message: "User invited successfully"})
-// }

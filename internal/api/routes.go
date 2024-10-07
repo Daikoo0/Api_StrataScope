@@ -8,10 +8,8 @@ func (a *API) RegisterRoutes(e *echo.Echo) {
 
 	users := e.Group("/users")
 
-	users.POST("/logout", a.LogoutUser)            // users/logout
 	users.POST("/register", a.RegisterUser)        // users/register
 	users.POST("/login", a.LoginUser)              // users/login
-	users.GET("/auth", a.AuthUser)                 // users/Auth
 	users.GET("/projects", a.projects)             // users
 	users.DELETE("/projects/:id", a.DeleteProject) // users/projects/:id
 
@@ -22,4 +20,5 @@ func (a *API) RegisterRoutes(e *echo.Echo) {
 	e.POST("/comment", a.AddComment)
 
 	e.GET("/activeProject", a.HandleGetActiveProject)
+	e.GET("/go", a.HandleGoroutines)
 }
