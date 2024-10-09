@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -31,7 +32,7 @@ func (a *API) AddComment(c echo.Context) error {
 func (a *API) projects(c echo.Context) error {
 	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
-		return err
+		return a.handleError(c, http.StatusUnauthorized, err.Error())
 	}
 
 	user := claims["email"].(string)
@@ -109,6 +110,8 @@ func (a *API) DeleteProject(c echo.Context) error {
 			}
 
 		} else {
+			existingRoom.DisconnectUsers()
+
 			err = a.repo.DeleteProject(ctx, id)
 			if err != nil {
 				return a.handleError(c, http.StatusInternalServerError, "Failed to delete room")
@@ -191,14 +194,14 @@ func (a *API) getContextAndClaims(c echo.Context) (ctx context.Context, claims m
 	ctx = c.Request().Context()
 	auth := c.Request().Header.Get("Authorization")
 	if auth == "" {
-		err = a.handleError(c, http.StatusUnauthorized, "Unauthorized")
+		err = fmt.Errorf("unauthorized: missing Authorization header")
 		return
 	}
 
 	claims, parseErr := encryption.ParseLoginJWT(auth)
 	if parseErr != nil {
-		log.Println(parseErr)
-		err = a.handleError(c, http.StatusUnauthorized, "Unauthorized")
+		log.Println("Token parsing error:", parseErr)
+		err = fmt.Errorf("unauthorized: invalid or expired token")
 		return
 	}
 

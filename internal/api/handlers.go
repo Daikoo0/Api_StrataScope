@@ -66,58 +66,55 @@ var rooms = make(map[string]*RoomData)
 var roomActionsThreshold = 10
 
 func RemoveElement(a *API, ctx context.Context, roomID string, conn *websocket.Conn, name string, project *RoomData) {
-	var index int = -1
-	for i, c := range rooms[roomID].Active {
-		if c == conn { // asumiendo que conn es comparable directamente
-			index = i
-			break
+
+	err := project.DisconnectUser(conn)
+	if err != nil {
+		log.Println("Error al desconectar el usuario:", err)
+		return
+	}
+
+	// Eliminar usuario de `SectionsEditing` si es necesario
+	for key, value := range project.SectionsEditing {
+		if value.(map[string]interface{})["name"] == name {
+			delete(project.SectionsEditing, key)
+
+			msgData := map[string]interface{}{
+				"action": "deleteEditingUser",
+				"value":  key,
+				"name":   name,
+			}
+
+			// Enviar mensaje sobre el usuario eliminado
+			sendSocketMessage(msgData, project, "deleteEditingUser")
 		}
 	}
 
-	if index != -1 {
-		for key, value := range rooms[roomID].SectionsEditing {
-			if value.(map[string]interface{})["name"] == name {
-				delete(rooms[roomID].SectionsEditing, key)
-				msgData := map[string]interface{}{
-					"action": "deleteEditingUser",
-					"value":  key,
-					"name":   name,
-				}
-
-				sendSocketMessage(msgData, project, "deleteEditingUser")
-			}
-		}
-		rooms[roomID].Active = append(rooms[roomID].Active[:index], rooms[roomID].Active[index+1:]...)
-
-		if len(rooms[roomID].Active) == 0 {
-			//guardar la sala
-			err := a.repo.SaveRoom(context.Background(), models.Project{ID: project.ID, ProjectInfo: project.ProjectInfo, Data: project.Data, Config: project.Config, Fosil: project.Fosil, Facies: project.Facies, Shared: project.Shared})
-			if err != nil {
-				return
-			}
-			//	Eliminar la sala del mapa de salas si no hay usuarios conectados
-			delete(rooms, roomID)
+	// Si no hay más usuarios conectados, guardar y eliminar la sala
+	if len(project.Active) == 0 {
+		err := a.repo.SaveRoom(ctx, models.Project{
+			ID:          project.ID,
+			ProjectInfo: project.ProjectInfo,
+			Data:        project.Data,
+			Config:      project.Config,
+			Fosil:       project.Fosil,
+			Facies:      project.Facies,
+			Shared:      project.Shared,
+		})
+		if err != nil {
+			log.Println("Error al guardar la sala:", err)
+			return
 		}
 
-		if _, exists := rooms[roomID]; exists {
-			log.Println("La habitación", roomID, "no fue eliminada correctamente.")
-		} else {
-			log.Println("La habitación", roomID, "fue eliminada correctamente.")
-		}
-		log.Print("////////////////////////////////////////")
-		log.Print(rooms)
+		log.Println("Proyecto guardado:", project.ID)
 
+		delete(rooms, roomID)
+		log.Println("La sala", roomID, "fue eliminada correctamente.")
 	}
 
+	log.Print(rooms)
 }
 
 func (a *API) HandleWebSocket(c echo.Context) error {
-
-	// defer func() {
-	// 	if r := recover(); r != nil {
-	// 		log.Println("Recuperado de un error/panic:", r)
-	// 	}
-	// }()
 
 	ctx := c.Request().Context()
 	roomID := c.Param("room")
@@ -136,16 +133,14 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 	auth := c.QueryParam("token")
 
 	if auth == "" {
-		errMessage := "Error: Unauthorized"
-		conn.WriteMessage(websocket.TextMessage, []byte(errMessage))
+		conn.WriteJSON(ErrorMessage{Action: "error", Message: "Access denied"})
 		conn.Close()
 		return nil
 	}
 
 	claims, err := encryption.ParseLoginJWT(auth)
 	if err != nil {
-		errMessage := "Error: Unauthorized"
-		conn.WriteMessage(websocket.TextMessage, []byte(errMessage))
+		conn.WriteJSON(ErrorMessage{Action: "error", Message: err.Error()})
 		conn.Close()
 		return nil
 	}
@@ -154,8 +149,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 
 	proyect := a.instanceRoom(ctx, roomID)
 	if proyect == nil {
-		errMessage := "Error: Room not found"
-		conn.WriteMessage(websocket.TextMessage, []byte(errMessage))
+		conn.WriteJSON(ErrorMessage{Action: "error", Message: "Room not found"})
 		conn.Close()
 		return nil
 	}
@@ -171,25 +165,23 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 	} else if proyect.ProjectInfo.Visible {
 		permission = 2
 	} else {
-		errMessage := ErrorMessage{
-			Action:  "error",
-			Message: "Access denied",
-		}
-
-		message, err := json.Marshal(errMessage)
-		if err != nil {
-			return err
-		}
-
-		if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			return err
-		}
-
+		conn.WriteJSON(ErrorMessage{Action: "error", Message: "Access denied"})
 		conn.Close()
 		return nil
 	}
 
+	proyect.mu.Lock()
 	proyect.Active = append(proyect.Active, conn)
+	proyect.mu.Unlock()
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Print("Error causado por: ", user)
+			log.Printf("Recovered from panic: %v", r)
+			conn.WriteJSON(ErrorMessage{Action: "error", Message: "Internal server error"})
+			proyect.DisconnectUser(conn)
+		}
+	}()
 
 	datos := proyect.Config.Columns
 
@@ -218,14 +210,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		"sectionsEditing": proyect.SectionsEditing,
 	}
 
-	databytes, err := json.Marshal(dataRoom)
-	if err != nil {
-		errMessage := "Error: cannot sent room config"
-		conn.WriteMessage(websocket.TextMessage, []byte(errMessage))
-	}
-	conn.WriteMessage(websocket.TextMessage, databytes)
-
-	if err == nil {
+	if err = conn.WriteJSON(dataRoom); err == nil {
 
 		log.Println("Usuario conectado: ", user)
 		log.Println("Permisos: ", permission)
@@ -757,9 +742,11 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		}
 	}
 
+	proyect.mu.Lock()
+	RemoveElement(a, ctx, roomID, conn, user, proyect)
+	proyect.mu.Unlock()
 	conn.Close()
-	log.Print("Me pitie la sala") //Mandar aviso para que no trate de reconectar
-	RemoveElement(a, ctx, roomID, conn, claims["email"].(string), proyect)
+	log.Println("Usuario desconectado: ", user)
 	return nil
 }
 
@@ -850,7 +837,10 @@ func añadir(project *RoomData, addData dtos.Add, newShape models.DataInfo) {
 	rowIndex := addData.RowIndex
 	height := addData.Height
 
-	// Actualiza la altura si se proporciona
+	if rowIndex < -1 || rowIndex > len(project.Data) {
+		return
+	}
+
 	if height != 0 {
 		newShape.Litologia.Height = height
 	}
@@ -1002,6 +992,10 @@ func editCircle(project *RoomData, editCircleData dtos.EditCircle) {
 
 func addFosil(project *RoomData, id string, newFosil models.Fosil) {
 
+	if newFosil.Upper < 0 || newFosil.Lower < 0 {
+		return
+	}
+
 	roomData := &project.Fosil
 	(*roomData)[id] = newFosil
 
@@ -1018,6 +1012,9 @@ func addFosil(project *RoomData, id string, newFosil models.Fosil) {
 func deleteFosil(project *RoomData, fosilID dtos.DeleteFosil) {
 
 	id := fosilID.IdFosil
+	if _, exists := project.Fosil[id]; !exists {
+		return
+	}
 
 	roomData := &project.Fosil
 	delete(*roomData, id)
@@ -1298,4 +1295,48 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, response)
+}
+
+func (r *RoomData) DisconnectUsers() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Desconectar a todos los usuarios conectados
+	for _, conn := range r.Active {
+		if conn != nil {
+
+			message := ErrorMessage{
+				Action:  "close",
+				Message: "project closed",
+			}
+
+			conn.WriteJSON(message)
+
+			err := conn.Close()
+			if err != nil {
+				fmt.Println("Error al cerrar la conexión:", err)
+			}
+		}
+	}
+
+	r.Active = nil
+}
+
+func (r *RoomData) DisconnectUser(conn *websocket.Conn) error {
+	// r.mu.Lock()
+	// defer r.mu.Unlock()
+
+	// Buscar la conexión específica en la lista de conexiones activas
+	for i, activeConn := range r.Active {
+		if activeConn == conn {
+			err := activeConn.Close()
+			if err != nil {
+				return fmt.Errorf("error al cerrar la conexión: %v", err)
+			}
+
+			r.Active = append(r.Active[:i], r.Active[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("conexión no encontrada")
 }
