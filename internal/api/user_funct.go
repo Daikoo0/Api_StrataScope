@@ -64,7 +64,7 @@ func (a *API) HandleCreateProyect(c echo.Context) error {
 
 	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
-		return err
+		return a.handleError(c, http.StatusUnauthorized, err.Error())
 	}
 
 	correo := claims["email"].(string)
@@ -91,7 +91,7 @@ func (a *API) DeleteProject(c echo.Context) error {
 
 	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
-		return err
+		return a.handleError(c, http.StatusUnauthorized, err.Error())
 	}
 
 	user := claims["email"].(string)
@@ -144,7 +144,7 @@ func (a *API) HandleGetPublicProject(c echo.Context) error {
 	ctx := c.Request().Context()
 	auth := c.Request().Header.Get("Authorization")
 	if auth == "" {
-		return a.handleError(c, http.StatusUnauthorized, "Unauthorized")
+		return a.handleError(c, http.StatusUnauthorized, "invalid or expired token")
 	}
 
 	proyects, err := a.repo.HandleGetPublicProject(ctx)
@@ -160,7 +160,7 @@ func (a *API) HandleGetPublicProject(c echo.Context) error {
 func (a *API) HandleEditProfile(c echo.Context) error {
 	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
-		return err
+		return a.handleError(c, http.StatusUnauthorized, err.Error())
 	}
 
 	email := claims["email"].(string)
@@ -194,14 +194,13 @@ func (a *API) getContextAndClaims(c echo.Context) (ctx context.Context, claims m
 	ctx = c.Request().Context()
 	auth := c.Request().Header.Get("Authorization")
 	if auth == "" {
-		err = fmt.Errorf("unauthorized: missing Authorization header")
+		err = fmt.Errorf("invalid or expired token")
 		return
 	}
 
 	claims, parseErr := encryption.ParseLoginJWT(auth)
 	if parseErr != nil {
-		log.Println("Token parsing error:", parseErr)
-		err = fmt.Errorf("unauthorized: invalid or expired token")
+		err = fmt.Errorf("invalid or expired token")
 		return
 	}
 

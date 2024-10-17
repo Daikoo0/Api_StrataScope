@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"sync"
 
-	"crypto/rand"
 	"encoding/hex"
 	"log"
+	"math/rand"
 	"net/http"
 
 	"time"
@@ -22,6 +22,18 @@ import (
 	"github.com/lithammer/shortuuid/v4"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+var colors = []string{
+	"#FF5733", // Rojo
+	"#33FF57", // Verde
+	"#3357FF", // Azul
+	"#F0E68C", // Khaki
+	"#FF33A6", // Rosa
+	"#33FFF8", // Cyan
+	"#FF8333", // Naranja
+	"#B3FF33", // Lima
+	"#C33FFF", // Púrpura
+}
 
 type ErrorMessage struct {
 	Action  string `json:"action"`
@@ -43,50 +55,39 @@ type ProjectResponse struct {
 	TotalPages  int                  `json:"totalPages"`
 }
 
+type UserConnection struct {
+	Email   string
+	Conn    *websocket.Conn
+	Editing string
+	Color   string
+}
+
 type RoomData struct {
-	mu              sync.Mutex
-	ID              primitive.ObjectID
-	ProjectInfo     models.ProjectInfo
-	Data            []models.DataInfo
-	Config          models.Config
-	Fosil           map[string]models.Fosil
-	Facies          map[string][]models.FaciesSection
-	Shared          models.Shared
-	Active          []*websocket.Conn
-	SectionsEditing map[string]interface{}
-	UserColors      map[string]string
-	undoStack       []Action
-	redoStack       []Action
-	saveTimer       *time.Timer
-	actionsCounter  int
+	mu             sync.Mutex
+	ID             primitive.ObjectID
+	ProjectInfo    models.ProjectInfo
+	Data           []models.DataInfo
+	Config         models.Config
+	Fosil          map[string]models.Fosil
+	Facies         map[string][]models.FaciesSection
+	Shared         models.Shared
+	Active         map[string]*UserConnection
+	undoStack      []Action
+	redoStack      []Action
+	saveTimer      *time.Timer
+	actionsCounter int
 }
 
 var rooms = make(map[string]*RoomData)
 
 var roomActionsThreshold = 10
 
-func RemoveElement(a *API, ctx context.Context, roomID string, conn *websocket.Conn, name string, project *RoomData) {
+func RemoveElement(a *API, ctx context.Context, roomID string, userID string, project *RoomData) {
 
-	err := project.DisconnectUser(conn)
+	err := project.DisconnectUser(userID)
 	if err != nil {
 		log.Println("Error al desconectar el usuario:", err)
 		return
-	}
-
-	// Eliminar usuario de `SectionsEditing` si es necesario
-	for key, value := range project.SectionsEditing {
-		if value.(map[string]interface{})["name"] == name {
-			delete(project.SectionsEditing, key)
-
-			msgData := map[string]interface{}{
-				"action": "deleteEditingUser",
-				"value":  key,
-				"name":   name,
-			}
-
-			// Enviar mensaje sobre el usuario eliminado
-			sendSocketMessage(msgData, project, "deleteEditingUser")
-		}
 	}
 
 	// Si no hay más usuarios conectados, guardar y eliminar la sala
@@ -105,10 +106,10 @@ func RemoveElement(a *API, ctx context.Context, roomID string, conn *websocket.C
 			return
 		}
 
-		log.Println("Proyecto guardado:", project.ID)
+		log.Println("Project saved: ", project.ID)
 
 		delete(rooms, roomID)
-		log.Println("La sala", roomID, "fue eliminada correctamente.")
+		log.Println("Deleted room: ", roomID)
 	}
 
 	log.Print(rooms)
@@ -146,6 +147,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 	}
 
 	user := claims["email"].(string)
+	userID := shortuuid.New()
 
 	proyect := a.instanceRoom(ctx, roomID)
 	if proyect == nil {
@@ -170,50 +172,26 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		return nil
 	}
 
-	proyect.mu.Lock()
-	proyect.Active = append(proyect.Active, conn)
-	proyect.mu.Unlock()
-
 	defer func() {
 		if r := recover(); r != nil {
 			log.Print("Error causado por: ", user)
 			log.Printf("Recovered from panic: %v", r)
 			conn.WriteJSON(ErrorMessage{Action: "error", Message: "Internal server error"})
-			proyect.DisconnectUser(conn)
+			proyect.DisconnectUsers()
+			delete(rooms, roomID)
 		}
 	}()
 
-	datos := proyect.Config.Columns
-
 	orden := []string{"Sistema", "Edad", "Formacion", "Miembro", "Espesor", "Litologia", "Estructura fosil", "Facie", "AmbienteDepositacional", "Descripcion"}
 
-	var claves []string
-
-	for _, clave := range orden {
-		if valor, existe := datos[clave]; existe && valor {
-			claves = append(claves, clave)
-		}
-	}
-
-	msgData := map[string]interface{}{
-		"header":     claves,
-		"isInverted": proyect.Config.IsInverted,
-	}
-
-	dataRoom := map[string]interface{}{
-		"action":          "data",
-		"projectInfo":     proyect.ProjectInfo,
-		"data":            proyect.Data,
-		"config":          msgData,
-		"fosil":           proyect.Fosil,
-		"facies":          proyect.Facies,
-		"sectionsEditing": proyect.SectionsEditing,
-	}
+	dataRoom := proyect.DataProject(orden)
 
 	if err = conn.WriteJSON(dataRoom); err == nil {
 
-		log.Println("Usuario conectado: ", user)
-		log.Println("Permisos: ", permission)
+		proyect.AddUser(conn, user, userID)
+		sendSocketMessage(map[string]interface{}{"action": "userConnected", "id": userID, "mail": user, "color": proyect.Active[userID].Color}, proyect, "userConnected")
+		log.Println("\033[36m User connected: ", user, "\033[0m")
+		log.Println("Permissions: ", permission)
 
 		for {
 			_, msg, err := conn.ReadMessage()
@@ -242,6 +220,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 								err := a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Shared: proyect.Shared})
 								if err != nil {
 									log.Println("Error guardando el proyecto automáticamente: ", err)
+
 								} else {
 									log.Println("Proyecto guardado: ", proyect.ID)
 								}
@@ -309,34 +288,20 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						log.Println("Error al deserializar: ", err)
 					}
 
-					//var name = claims["name"].(string)
 					section := editing.Section
-					roomData := rooms[roomID]
 
-					color, exists := roomData.UserColors[user]
-					if !exists {
-						// Generar un color único para el usuario y guardarlo en el mapa
-						color = generateRandomColor()
-						roomData.UserColors[user] = color
-					}
-
-					if roomData.SectionsEditing == nil {
-						// Si no está inicializado, inicialízalo
-						roomData.SectionsEditing = make(map[string]interface{})
-					}
+					proyect.Active[userID].Editing = section
 
 					msgData := map[string]interface{}{
-						"action":   "editingUser",
-						"userName": user,
-						"color":    color,
-						"value":    section,
+						"action": "editingUser",
+						"value":  section,
+						"data": map[string]interface{}{
+							"id":    userID,
+							"name":  user,
+							"color": proyect.Active[userID].Color,
+						},
 					}
 
-					roomData.SectionsEditing[section] = map[string]interface{}{
-						"name":  user,
-						"color": color,
-						//"section" : section,
-					}
 					sendSocketMessage(msgData, proyect, "editingUser")
 
 				case "deleteEditingUser":
@@ -346,25 +311,18 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						log.Println("Error al deserializar: ", err)
 						break
 					}
+
 					section := editing.Section
-					roomData := rooms[roomID]
-					name := editing.Name
 
-					if roomData.SectionsEditing != nil {
-						if _, ok := roomData.SectionsEditing[section]; ok {
-							delete(roomData.SectionsEditing, section)
+					proyect.Active[userID].Editing = ""
 
-							msgData := map[string]interface{}{
-								"action": "deleteEditingUser",
-								"value":  section,
-								"name":   name,
-							}
-
-							sendSocketMessage(msgData, proyect, "deleteEditingUser")
-						} else {
-							log.Println("El elemento a eliminar no existe")
-						}
+					msgData := map[string]interface{}{
+						"action":   "deleteEditingUser",
+						"value":    section,
+						"userName": user,
 					}
+
+					sendSocketMessage(msgData, proyect, "deleteEditingUser")
 
 				case "añadir":
 
@@ -742,11 +700,8 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		}
 	}
 
-	proyect.mu.Lock()
-	RemoveElement(a, ctx, roomID, conn, user, proyect)
-	proyect.mu.Unlock()
-	conn.Close()
-	log.Println("Usuario desconectado: ", user)
+	RemoveElement(a, ctx, roomID, userID, proyect)
+
 	return nil
 }
 
@@ -755,18 +710,17 @@ func (a *API) HandleGoroutines(c echo.Context) error {
 	return c.String(http.StatusOK, fmt.Sprintf("Número total de goroutines: %d", runtime.NumGoroutine()))
 }
 
-func sendSocketMessage(msgData map[string]interface{}, proyect *RoomData, action string) {
-
+func sendSocketMessage(msgData map[string]interface{}, project *RoomData, action string) {
 	jsonMsg, err := json.Marshal(msgData)
 	if err != nil {
-		log.Fatal("Error al serializar mensaje:", err)
+		log.Fatal("Error serializing message:", err)
 	}
 
-	for _, client := range proyect.Active {
-		err = client.WriteMessage(websocket.TextMessage, jsonMsg)
+	for _, client := range project.Active {
+		err := client.Conn.WriteMessage(websocket.TextMessage, jsonMsg)
 		if err != nil {
-			log.Println("Error al enviar mensaje:", err)
-			log.Println("action: ", action)
+			log.Println("Error sending message:", err)
+			log.Println("Action:", action)
 		}
 	}
 
@@ -785,18 +739,16 @@ func (a *API) instanceRoom(ctx context.Context, roomID string) *RoomData {
 	}
 
 	newRoom := &RoomData{
-		ID:              room.ID,
-		ProjectInfo:     room.ProjectInfo,
-		Data:            room.Data,
-		Config:          room.Config,
-		Fosil:           room.Fosil,
-		Facies:          room.Facies,
-		Shared:          room.Shared,
-		Active:          make([]*websocket.Conn, 0),
-		SectionsEditing: make(map[string]interface{}),
-		UserColors:      make(map[string]string),
-		undoStack:       make([]Action, 0),
-		redoStack:       make([]Action, 0),
+		ID:          room.ID,
+		ProjectInfo: room.ProjectInfo,
+		Data:        room.Data,
+		Config:      room.Config,
+		Fosil:       room.Fosil,
+		Facies:      room.Facies,
+		Shared:      room.Shared,
+		Active:      make(map[string]*UserConnection),
+		undoStack:   make([]Action, 0),
+		redoStack:   make([]Action, 0),
 	}
 
 	rooms[roomID] = newRoom
@@ -816,12 +768,8 @@ func (a *API) HandleGetActiveProject(c echo.Context) error {
 
 // Generar un color aleatorio en formato hexadecimal
 func generateRandomColor() string {
-	color := make([]byte, 3)
-	_, err := rand.Read(color)
-	if err != nil {
-		panic(err)
-	}
-	return "#" + hex.EncodeToString(color)
+	randomIndex := rand.Intn(len(colors))
+	return colors[randomIndex]
 }
 
 // Generar una contraseña aleatoria de n bytes
@@ -1297,46 +1245,122 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-func (r *RoomData) DisconnectUsers() {
+func (r *RoomData) AddUser(conn *websocket.Conn, email string, userID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.Active[userID] = &UserConnection{
+		Email: email,
+		Conn:  conn,
+		Color: generateRandomColor(),
+	}
+}
+
+func (r *RoomData) DisconnectUsers() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	// Desconectar a todos los usuarios conectados
-	for _, conn := range r.Active {
-		if conn != nil {
-
+	for _, client := range r.Active {
+		if client != nil {
 			message := ErrorMessage{
 				Action:  "close",
 				Message: "project closed",
 			}
 
-			conn.WriteJSON(message)
-
-			err := conn.Close()
+			err := client.Conn.WriteJSON(message)
 			if err != nil {
-				fmt.Println("Error al cerrar la conexión:", err)
+				return fmt.Errorf("error sending close message to user %s: %w", client.Email, err)
+			}
+
+			err = client.Conn.Close()
+			if err != nil {
+				return fmt.Errorf("error closing connection of user %s: %w", client.Email, err)
 			}
 		}
 	}
 
-	r.Active = nil
+	r.Active = make(map[string]*UserConnection)
+	log.Println("All users disconnected from room: ", r.ID)
+	return nil
 }
 
-func (r *RoomData) DisconnectUser(conn *websocket.Conn) error {
-	// r.mu.Lock()
-	// defer r.mu.Unlock()
+func (r *RoomData) DisconnectUser(userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	// Buscar la conexión específica en la lista de conexiones activas
-	for i, activeConn := range r.Active {
-		if activeConn == conn {
-			err := activeConn.Close()
-			if err != nil {
-				return fmt.Errorf("error al cerrar la conexión: %v", err)
-			}
+	client, exists := r.Active[userID]
+	if !exists {
+		return fmt.Errorf("user %s not found", userID)
+	}
 
-			r.Active = append(r.Active[:i], r.Active[i+1:]...)
-			return nil
+	err := client.Conn.Close()
+	if err != nil {
+		return fmt.Errorf("error closing connection: %w", err)
+	}
+
+	log.Println("User disconnected: ", client.Email)
+	delete(r.Active, userID)
+	sendSocketMessage(map[string]interface{}{"action": "userDisconnected", "id": userID}, r, "userDisconnected")
+	return nil
+}
+
+func (r *RoomData) DataProject(orden []string) map[string]interface{} {
+
+	type User struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+
+	type UserEditing struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+		Id    string `json:"id"`
+	}
+
+	// Ordenar las columnas según el orden especificado
+	datos := r.Config.Columns
+
+	var claves []string
+	for _, clave := range orden {
+		if valor, existe := datos[clave]; existe && valor {
+			claves = append(claves, clave)
 		}
 	}
-	return fmt.Errorf("conexión no encontrada")
+
+	users := make(map[string]User)
+	userEditing := make(map[string]UserEditing)
+
+	// Llenar los mapas de usuarios
+	for key, value := range r.Active {
+		users[key] = User{
+			Name:  value.Email,
+			Color: value.Color,
+		}
+
+		if value.Editing != "" {
+			userEditing[value.Editing] = UserEditing{
+				Name:  value.Email,
+				Color: value.Color,
+				Id:    key,
+			}
+		}
+	}
+
+	// Construir el mapa de datos de la sala
+	dataRoom := map[string]interface{}{
+		"action":      "data",
+		"projectInfo": r.ProjectInfo,
+		"data":        r.Data,
+		"config": map[string]interface{}{
+			"header":     claves,
+			"isInverted": r.Config.IsInverted,
+		},
+		"fosil":       r.Fosil,
+		"facies":      r.Facies,
+		"users":       users,
+		"userEditing": userEditing,
+	}
+
+	return dataRoom
 }
