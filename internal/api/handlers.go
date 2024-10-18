@@ -80,7 +80,7 @@ type RoomData struct {
 
 var rooms = make(map[string]*RoomData)
 
-var roomActionsThreshold = 10
+var roomActionsThreshold = 30
 
 func RemoveElement(a *API, ctx context.Context, roomID string, userID string, project *RoomData) {
 
@@ -1178,18 +1178,18 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 
 	ctx, claimsAuth, err := a.getContextAndClaims(c)
 	if err != nil {
-		return err
+		return a.handleError(c, http.StatusUnauthorized, err.Error())
 	}
 
 	var requestBody struct {
 		Token string `json:"token"`
 	}
 	if err := c.Bind(&requestBody); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		return a.handleError(c, http.StatusBadRequest, "Invalid request body")
 	}
 	claims, err := encryption.ParseInviteToken(requestBody.Token)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid or expired token"})
+		return a.handleError(c, http.StatusUnauthorized, "Invalid or expired token link")
 	}
 
 	email := claimsAuth["email"].(string)
@@ -1206,13 +1206,12 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 		var err error
 		members, pass, err = a.repo.GetMembersAndPass(ctx, claims.RoomID)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, responseMessage{Message: err.Error()})
+			return a.handleError(c, http.StatusInternalServerError, err.Error())
 		}
 	}
 
 	if pass != storedPass {
-		log.Println("Contraseña incorrecta")
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid or expired token"})
+		return a.handleError(c, http.StatusUnauthorized, "Invalid or expired token link")
 	}
 
 	response := map[string]interface{}{
@@ -1234,12 +1233,10 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 		case "readers":
 			existingRoom.ProjectInfo.Members.Readers = append(existingRoom.ProjectInfo.Members.Readers, email)
 		}
-	} else {
-		err := a.repo.AddUserToProject(context.Background(), email, claims.Role, claims.RoomID)
-		if err != nil {
-			log.Print("Error añadiendo usuario a la sala: ")
-			return c.JSON(http.StatusInternalServerError, responseMessage{Message: err.Error()})
-		}
+	}
+
+	if err := a.repo.AddUserToProject(context.Background(), email, claims.Role, claims.RoomID); err != nil {
+		return a.handleError(c, http.StatusInternalServerError, "Server error")
 	}
 
 	return c.JSON(http.StatusOK, response)
