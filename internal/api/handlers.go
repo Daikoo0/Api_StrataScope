@@ -204,7 +204,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 				err := json.Unmarshal([]byte(msg), &dataMap)
 
 				if err != nil {
-					log.Fatal(err)
+					log.Print(err)
 				}
 
 				if dataMap.Action != "editingUser" && dataMap.Action != "deleteEditingUser" && dataMap.Action != "columns" {
@@ -713,7 +713,8 @@ func (a *API) HandleGoroutines(c echo.Context) error {
 func sendSocketMessage(msgData map[string]interface{}, project *RoomData, action string) {
 	jsonMsg, err := json.Marshal(msgData)
 	if err != nil {
-		log.Fatal("Error serializing message:", err)
+		log.Println("Error serializing message:", err)
+		return
 	}
 
 	for _, client := range project.Active {

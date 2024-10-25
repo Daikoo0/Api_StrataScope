@@ -21,7 +21,7 @@ func (r *repo) GetRoom(ctx context.Context, roomID string) (*models.Project, err
 	var room models.Project
 	objectID, err := primitive.ObjectIDFromHex(roomID)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	err = rooms.FindOne(ctx, bson.M{"_id": objectID}).Decode(&room)
@@ -39,7 +39,6 @@ func (r *repo) GetRoomInfo(ctx context.Context, roomID string) (*models.ProjectI
 	var projectInfo models.ProjectInfo
 	objectID, err := primitive.ObjectIDFromHex(roomID)
 	if err != nil {
-		log.Fatal(err)
 		return nil, err
 	}
 
@@ -204,7 +203,7 @@ func (r *repo) UpdateMembers(ctx context.Context, roomID string, members models.
 	rooms := r.db.Collection("projects")
 	objectID, err := primitive.ObjectIDFromHex(roomID)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	filter := bson.M{"_id": objectID}
@@ -234,7 +233,7 @@ func (r *repo) GetMembers(ctx context.Context, roomID string) (*models.Members, 
 
 	objectID, err := primitive.ObjectIDFromHex(roomID)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	projection := bson.M{
@@ -263,7 +262,8 @@ func (r *repo) GetMembersAndPass(ctx context.Context, roomID string) (*models.Me
 
 	objectID, err := primitive.ObjectIDFromHex(roomID)
 	if err != nil {
-		log.Fatal(err)
+
+		return nil, "", err
 	}
 
 	projection := bson.M{
