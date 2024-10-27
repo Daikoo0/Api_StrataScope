@@ -658,6 +658,39 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 							},
 						},
 					)
+				case "addColumn":
+
+					var column models.Column
+					err := json.Unmarshal(dataMap.Data, &column)
+					if err != nil {
+						log.Println("Error deserializando columna:", err)
+						break
+					}
+
+					column.Visible = true
+
+					performAction(proyect,
+						Action{
+							Execute: func() {
+								proyect.Config.Columns = append(proyect.Config.Columns, column)
+
+								sendSocketMessage(map[string]interface{}{
+									"action": "addColumn",
+									"column": column,
+								}, proyect, "addColumn")
+
+							},
+							Undo: func() {
+								proyect.Config.Columns = proyect.Config.Columns[:len(proyect.Config.Columns)-1]
+
+								sendSocketMessage(map[string]interface{}{
+									"action": "delColumn",
+									"column": column,
+								}, proyect, "addColumn")
+
+							},
+						},
+					)
 
 				case "isInverted":
 
