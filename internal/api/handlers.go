@@ -182,9 +182,9 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		}
 	}()
 
-	orden := []string{"Sistema", "Edad", "Formacion", "Miembro", "Espesor", "Litologia", "Estructura fosil", "Facie", "AmbienteDepositacional", "Descripcion"}
+	// orden := []string{"Sistema", "Edad", "Formacion", "Miembro", "Espesor", "Litologia", "Estructura fosil", "Facie", "AmbienteDepositacional", "Descripcion"}
 
-	dataRoom := proyect.DataProject(orden)
+	dataRoom := proyect.DataProject()
 
 	if err = conn.WriteJSON(dataRoom); err == nil {
 
@@ -479,7 +479,13 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						break
 					}
 
-					oldvalue := GetFieldString(proyect.Data[editTextData.RowIndex], editTextData.Key)
+					log.Print(editTextData)
+
+					// oldvalue := GetFieldString(proyect.Data[editTextData.RowIndex], editTextData.Key)
+					oldvalue, ok := proyect.Data[editTextData.RowIndex].Columns[editTextData.Key].(string)
+					if !ok {
+						oldvalue = ""
+					}
 					textData := editTextData
 					textData.Value = oldvalue
 
@@ -661,35 +667,35 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 
 					a.save(proyect)
 
-				case "columns":
-					var column dtos.Column
-					err := json.Unmarshal(dataMap.Data, &column)
-					if err != nil {
-						log.Println("Error deserializando columna:", err)
-						break
-					}
-					// datos := rooms[roomID].Config["columns"].(map[string]interface{})
-					datos := rooms[roomID].Config.Columns
-					datos[column.Column] = column.IsVisible
+					// case "columns":
+					// 	var column dtos.Column
+					// 	err := json.Unmarshal(dataMap.Data, &column)
+					// 	if err != nil {
+					// 		log.Println("Error deserializando columna:", err)
+					// 		break
+					// 	}
+					// 	// datos := rooms[roomID].Config["columns"].(map[string]interface{})
+					// 	datos := rooms[roomID].Config.Columns
+					// 	datos[column.Column] = column.IsVisible
 
-					// Crear un slice para almacenar las columnas ordenadas
-					//orderedColumns := make([]interface{}, len(orden))
-					var orderedVisibleColumns []string
+					// 	// Crear un slice para almacenar las columnas ordenadas
+					// 	//orderedColumns := make([]interface{}, len(orden))
+					// 	var orderedVisibleColumns []string
 
-					// Llenar el slice con los datos de las columnas en el orden correcto
-					for _, colName := range orden {
-						if isVisible, ok := datos[colName]; ok && isVisible {
-							// Si la columna es visible (IsVisible == true), agregar su nombre al slice.
-							orderedVisibleColumns = append(orderedVisibleColumns, colName)
-						}
-					}
+					// 	// Llenar el slice con los datos de las columnas en el orden correcto
+					// 	for _, colName := range orden {
+					// 		if isVisible, ok := datos[colName]; ok && isVisible {
+					// 			// Si la columna es visible (IsVisible == true), agregar su nombre al slice.
+					// 			orderedVisibleColumns = append(orderedVisibleColumns, colName)
+					// 		}
+					// 	}
 
-					msgData := map[string]interface{}{
-						"action":  "columns",
-						"columns": orderedVisibleColumns,
-					}
+					// 	msgData := map[string]interface{}{
+					// 		"action":  "columns",
+					// 		"columns": orderedVisibleColumns,
+					// 	}
 
-					sendSocketMessage(msgData, proyect, "columns")
+					// 	sendSocketMessage(msgData, proyect, "columns")
 
 				}
 				proyect.mu.Unlock()
@@ -844,7 +850,7 @@ func editText(project *RoomData, editTextData dtos.EditText) {
 
 	roomData := &project.Data[rowIndex]
 
-	UpdateFieldAll(roomData, key, value)
+	roomData.Columns[key] = value
 
 	msgData := map[string]interface{}{
 		"action":   "editText",
@@ -1303,7 +1309,7 @@ func (r *RoomData) DisconnectUser(userID string) error {
 	return nil
 }
 
-func (r *RoomData) DataProject(orden []string) map[string]interface{} {
+func (r *RoomData) DataProject() map[string]interface{} {
 
 	type User struct {
 		Name  string `json:"name"`
@@ -1314,16 +1320,6 @@ func (r *RoomData) DataProject(orden []string) map[string]interface{} {
 		Name  string `json:"name"`
 		Color string `json:"color"`
 		Id    string `json:"id"`
-	}
-
-	// Ordenar las columnas según el orden especificado
-	datos := r.Config.Columns
-
-	var claves []string
-	for _, clave := range orden {
-		if valor, existe := datos[clave]; existe && valor {
-			claves = append(claves, clave)
-		}
 	}
 
 	users := make(map[string]User)
@@ -1350,10 +1346,7 @@ func (r *RoomData) DataProject(orden []string) map[string]interface{} {
 		"action":      "data",
 		"projectInfo": r.ProjectInfo,
 		"data":        r.Data,
-		"config": map[string]interface{}{
-			"header":     claves,
-			"isInverted": r.Config.IsInverted,
-		},
+		"config":      r.Config,
 		"fosil":       r.Fosil,
 		"facies":      r.Facies,
 		"users":       users,

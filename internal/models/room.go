@@ -10,9 +10,14 @@ type Members struct {
 	Readers []string
 }
 
+type Column struct {
+	Name    string
+	Visible bool
+}
+
 type Config struct {
-	Columns    map[string]bool `bson:"columns" json:"Columns"`
-	IsInverted bool            `bson:"isInverted" json:"IsInverted"`
+	Columns    []Column `bson:"columns" json:"Columns"`
+	IsInverted bool     `bson:"isInverted" json:"IsInverted"`
 }
 
 type Shared struct {
@@ -55,15 +60,8 @@ type Data_project struct {
 }
 
 type DataInfo struct {
-	Sistema                string         `json:"Sistema"`
-	Edad                   string         `json:"Edad"`
-	Formacion              string         `json:"Formacion"`
-	Miembro                string         `json:"Miembro"`
-	Espesor                string         `json:"Espesor"`
-	Facie                  string         `json:"Facie"`
-	AmbienteDepositacional string         `json:"AmbienteDepositacional"`
-	Descripcion            string         `json:"Descripcion"`
-	Litologia              LitologiaStruc `json:"Litologia"`
+	Columns   map[string]interface{} `json:"Columns"`
+	Litologia LitologiaStruc         `json:"Litologia"`
 }
 
 type LitologiaStruc struct {
@@ -120,14 +118,7 @@ func NewCircle(point float32) CircleStruc {
 
 func NewShape() DataInfo {
 	return DataInfo{
-		Sistema:                "",
-		Edad:                   "",
-		Formacion:              "",
-		Miembro:                "",
-		Espesor:                "",
-		Facie:                  "",
-		AmbienteDepositacional: "",
-		Descripcion:            "",
+		Columns: map[string]interface{}{},
 		Litologia: LitologiaStruc{
 			ColorFill:   "#ffffff",
 			ColorStroke: "#000000",
