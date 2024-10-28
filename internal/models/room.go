@@ -11,8 +11,9 @@ type Members struct {
 }
 
 type Column struct {
-	Name    string
-	Visible bool
+	Name      string
+	Visible   bool
+	Removable bool
 }
 
 type Config struct {

@@ -668,29 +668,23 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 					}
 
 					column.Visible = true
+					column.Removable = true
 
-					performAction(proyect,
-						Action{
-							Execute: func() {
-								proyect.Config.Columns = append(proyect.Config.Columns, column)
+					found := false
+					for _, col := range proyect.Config.Columns {
+						if col.Name == column.Name {
+							found = true
+							break
+						}
+					}
+					if !found {
+						proyect.Config.Columns = append(proyect.Config.Columns, column)
 
-								sendSocketMessage(map[string]interface{}{
-									"action": "addColumn",
-									"column": column,
-								}, proyect, "addColumn")
-
-							},
-							Undo: func() {
-								proyect.Config.Columns = proyect.Config.Columns[:len(proyect.Config.Columns)-1]
-
-								sendSocketMessage(map[string]interface{}{
-									"action": "delColumn",
-									"column": column,
-								}, proyect, "addColumn")
-
-							},
-						},
-					)
+						sendSocketMessage(map[string]interface{}{
+							"action": "addColumn",
+							"column": column,
+						}, proyect, "addColumn")
+					}
 
 				case "deleteColumn":
 
@@ -701,33 +695,25 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						break
 					}
 
-					performAction(proyect,
-						Action{
-							Execute: func() {
-								for i, col := range proyect.Config.Columns {
-									if col.Name == column.Name {
-										proyect.Config.Columns = append(proyect.Config.Columns[:i], proyect.Config.Columns[i+1:]...)
-										break
-									}
-								}
+					columnDeleted := false
 
-								sendSocketMessage(map[string]interface{}{
-									"action": "delColumn",
-									"column": column,
-								}, proyect, "deleteColumn")
+					for i, col := range proyect.Config.Columns {
+						if col.Name == column.Name {
+							log.Println(col.Removable)
+							if col.Removable {
+								proyect.Config.Columns = append(proyect.Config.Columns[:i], proyect.Config.Columns[i+1:]...)
+								columnDeleted = true
+							}
+							break
+						}
+					}
 
-							},
-							Undo: func() {
-								proyect.Config.Columns = append(proyect.Config.Columns, column)
-
-								sendSocketMessage(map[string]interface{}{
-									"action": "addColumn",
-									"column": column,
-								}, proyect, "deleteColumn")
-
-							},
-						},
-					)
+					if columnDeleted {
+						sendSocketMessage(map[string]interface{}{
+							"action": "deleteColumn",
+							"column": column.Name,
+						}, proyect, "deleteColumn")
+					}
 
 				case "isInverted":
 
