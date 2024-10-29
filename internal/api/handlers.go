@@ -70,6 +70,7 @@ type RoomData struct {
 	Config         models.Config
 	Fosil          map[string]models.Fosil
 	Facies         map[string][]models.FaciesSection
+	Muestras       map[string]models.Muestra
 	Shared         models.Shared
 	Active         map[string]*UserConnection
 	undoStack      []Action
@@ -99,6 +100,7 @@ func RemoveElement(a *API, ctx context.Context, roomID string, userID string, pr
 			Config:      project.Config,
 			Fosil:       project.Fosil,
 			Facies:      project.Facies,
+			Muestras:    project.Muestras,
 			Shared:      project.Shared,
 		})
 		if err != nil {
@@ -193,6 +195,27 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		log.Println("\033[36m User connected: ", user, "\033[0m")
 		log.Println("Permissions: ", permission)
 
+		// Iniciar el ticker de ping
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		// Configuramos el handler para manejar el "pong"
+		// conn.SetPongHandler(func(appData string) error {
+		// 	return nil
+		// })
+
+		// Enviar "ping" periódicamente
+		go func() {
+			for range ticker.C {
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					// log.Println("Error sending ping:", err)
+					conn.Close() // Cerrar la conexión si falla
+					return
+				}
+				log.Println("Ping sent to client")
+			}
+		}()
+
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -217,7 +240,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						if saveTimer != nil {
 							if actionsCounter >= roomActionsThreshold {
 								// Guardado fuera del lock
-								err := a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Shared: proyect.Shared})
+								err := a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Muestras: proyect.Muestras, Shared: proyect.Shared})
 								if err != nil {
 									log.Println("Error guardando el proyecto automáticamente: ", err)
 
@@ -247,7 +270,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 								<-proyect.saveTimer.C
 
 								// Guardado fuera del lock
-								err := a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Shared: proyect.Shared})
+								err := a.repo.SaveRoom(context.Background(), models.Project{ID: proyect.ID, ProjectInfo: proyect.ProjectInfo, Data: proyect.Data, Config: proyect.Config, Fosil: proyect.Fosil, Facies: proyect.Facies, Muestras: proyect.Muestras, Shared: proyect.Shared})
 								if err != nil {
 									log.Println("Error guardando el proyecto automáticamente: ", err)
 								} else {
@@ -404,6 +427,29 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 							},
 						},
 					)
+				case "addMuestra":
+
+					var muestra models.Muestra
+					err := json.Unmarshal(dataMap.Data, &muestra)
+					if err != nil {
+						log.Println("Error", err)
+						break
+					}
+
+					id := shortuuid.New()
+
+					log.Println(muestra, id, "aquiii")
+
+					performAction(proyect,
+						Action{
+							Execute: func() {
+								addMuestra(proyect, id, muestra)
+							},
+							Undo: func() {
+								deleteMuestra(proyect, dtos.DeleteMuestra{IdMuestra: id})
+							},
+						},
+					)
 
 				case "addFacie":
 
@@ -546,6 +592,28 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						},
 					)
 
+				case "editMuestra":
+
+					var muestra dtos.EditMuestra
+					err := json.Unmarshal(dataMap.Data, &muestra)
+					if err != nil {
+						log.Println("Error deserializando muestra:", err)
+						break
+					}
+
+					oldMuestra := proyect.Muestras[muestra.IdMuestra]
+
+					performAction(proyect,
+						Action{
+							Execute: func() {
+								editMuestra(proyect, muestra.IdMuestra, models.NewMuestra(muestra.Upper, muestra.Lower, muestra.MuestraText, muestra.X))
+							},
+							Undo: func() {
+								editMuestra(proyect, muestra.IdMuestra, oldMuestra)
+							},
+						},
+					)
+
 				case "delete":
 
 					var deleteData dtos.Delete
@@ -608,6 +676,28 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 							},
 							Undo: func() {
 								addFosil(proyect, fosilID.IdFosil, fosil)
+							},
+						},
+					)
+
+				case "deleteMuestra":
+
+					var muestraID dtos.DeleteMuestra
+					err := json.Unmarshal(dataMap.Data, &muestraID)
+					if err != nil {
+						log.Println("Error deserializando fósil:", err)
+						break
+					}
+
+					muestra := proyect.Muestras[muestraID.IdMuestra]
+
+					performAction(proyect,
+						Action{
+							Execute: func() {
+								deleteMuestra(proyect, muestraID)
+							},
+							Undo: func() {
+								addMuestra(proyect, muestraID.IdMuestra, muestra)
 							},
 						},
 					)
@@ -807,6 +897,7 @@ func (a *API) instanceRoom(ctx context.Context, roomID string) *RoomData {
 		Data:        room.Data,
 		Config:      room.Config,
 		Fosil:       room.Fosil,
+		Muestras:    room.Muestras,
 		Facies:      room.Facies,
 		Shared:      room.Shared,
 		Active:      make(map[string]*UserConnection),
@@ -1020,6 +1111,31 @@ func addFosil(project *RoomData, id string, newFosil models.Fosil) {
 
 }
 
+func addMuestra(project *RoomData, id string, newMuestra models.Muestra) {
+
+	if newMuestra.Upper < 0 || newMuestra.Lower < 0 {
+		return
+	}
+
+	log.Println(id, "aquii2")
+
+	roomData := &project.Muestras
+	(*roomData)[id] = newMuestra
+
+	log.Println(roomData, "aquii3")
+
+	msgData := map[string]interface{}{
+		"action":    "addMuestra",
+		"idMuestra": id,
+		"value":     newMuestra,
+	}
+
+	log.Println(msgData, "aquii4")
+
+	sendSocketMessage(msgData, project, "addMuestra")
+
+}
+
 func deleteFosil(project *RoomData, fosilID dtos.DeleteFosil) {
 
 	id := fosilID.IdFosil
@@ -1039,6 +1155,25 @@ func deleteFosil(project *RoomData, fosilID dtos.DeleteFosil) {
 
 }
 
+func deleteMuestra(project *RoomData, muestraID dtos.DeleteMuestra) {
+
+	id := muestraID.IdMuestra
+	if _, exists := project.Muestras[id]; !exists {
+		return
+	}
+
+	roomData := &project.Muestras
+	delete(*roomData, id)
+
+	msgData := map[string]interface{}{
+		"action":    "deleteMuestra",
+		"idMuestra": id,
+	}
+
+	sendSocketMessage(msgData, project, "deleteMuestra")
+
+}
+
 func editFosil(project *RoomData, id string, newFosil models.Fosil) {
 
 	roomData := &project.Fosil
@@ -1051,6 +1186,21 @@ func editFosil(project *RoomData, id string, newFosil models.Fosil) {
 	}
 
 	sendSocketMessage(msgData, project, "editFosil")
+
+}
+
+func editMuestra(project *RoomData, id string, newMuestra models.Muestra) {
+
+	roomData := &project.Muestras
+	(*roomData)[id] = newMuestra
+
+	msgData := map[string]interface{}{
+		"action":    "editMuestra",
+		"idMuestra": id,
+		"value":     newMuestra,
+	}
+
+	sendSocketMessage(msgData, project, "editMuestra")
 
 }
 
@@ -1131,7 +1281,7 @@ func isInverted(project *RoomData, dataMap GeneralMessage) {
 
 func (a *API) save(project *RoomData) {
 
-	err := a.repo.SaveRoom(context.Background(), models.Project{ID: project.ID, ProjectInfo: project.ProjectInfo, Data: project.Data, Config: project.Config, Fosil: project.Fosil, Facies: project.Facies, Shared: project.Shared})
+	err := a.repo.SaveRoom(context.Background(), models.Project{ID: project.ID, ProjectInfo: project.ProjectInfo, Data: project.Data, Config: project.Config, Fosil: project.Fosil, Facies: project.Facies, Muestras: project.Muestras, Shared: project.Shared})
 	if err != nil {
 		log.Println("No se guardo la data")
 	}
@@ -1404,6 +1554,7 @@ func (r *RoomData) DataProject() map[string]interface{} {
 		"data":        r.Data,
 		"config":      r.Config,
 		"fosil":       r.Fosil,
+		"muestras":    r.Muestras,
 		"facies":      r.Facies,
 		"users":       users,
 		"userEditing": userEditing,

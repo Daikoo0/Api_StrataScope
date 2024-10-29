@@ -32,6 +32,7 @@ type Project struct {
 	Config      Config                     `bson:"config"`
 	Fosil       map[string]Fosil           `bson:"fosil"`
 	Facies      map[string][]FaciesSection `bson:"facies"`
+	Muestras    map[string]Muestra         `bson:"muestras"`
 	Shared      Shared                     `bson:"shared"`
 }
 
@@ -97,6 +98,12 @@ type Fosil struct {
 	FosilImg string  `json:"fosilImg"`
 	X        float32 `json:"x"`
 }
+type Muestra struct {
+	Upper       int     `json:"upper"`
+	Lower       int     `json:"lower"`
+	MuestraText string  `json:"muestraText"`
+	X           float32 `json:"x"`
+}
 
 func NewFosil(upper int, lower int, fosilImg string, x float32) Fosil {
 	return Fosil{
@@ -104,6 +111,15 @@ func NewFosil(upper int, lower int, fosilImg string, x float32) Fosil {
 		Lower:    lower,
 		FosilImg: fosilImg,
 		X:        x,
+	}
+}
+
+func NewMuestra(upper int, lower int, muestraText string, x float32) Muestra {
+	return Muestra{
+		Upper:       upper,
+		Lower:       lower,
+		MuestraText: muestraText,
+		X:           x,
 	}
 }
 

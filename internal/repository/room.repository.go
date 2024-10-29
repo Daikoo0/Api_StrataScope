@@ -76,9 +76,10 @@ func (r *repo) CreateRoom(ctx context.Context, roomName string, name string, cor
 			Long:         long,
 			Visible:      visible,
 		},
-		Data:   []models.DataInfo{},
-		Fosil:  map[string]models.Fosil{},
-		Facies: map[string][]models.FaciesSection{},
+		Data:     []models.DataInfo{},
+		Fosil:    map[string]models.Fosil{},
+		Muestras: map[string]models.Muestra{},
+		Facies:   map[string][]models.FaciesSection{},
 		Config: models.Config{
 			Columns: []models.Column{
 				{Name: "Sistema", Visible: true, Removable: true},
@@ -89,6 +90,7 @@ func (r *repo) CreateRoom(ctx context.Context, roomName string, name string, cor
 				{Name: "Litologia", Visible: true, Removable: false},
 				{Name: "Estructura fosil", Visible: true, Removable: false},
 				{Name: "Facie", Visible: true, Removable: false},
+				{Name: "Muestras", Visible: true, Removable: false},
 				{Name: "AmbienteDepositacional", Visible: true, Removable: true},
 				{Name: "Descripcion", Visible: true, Removable: true},
 			},
@@ -147,6 +149,7 @@ func (r *repo) SaveRoom(ctx context.Context, data models.Project) error {
 		"config":      data.Config,
 		"fosil":       data.Fosil,
 		"facies":      data.Facies,
+		"muestras":    data.Muestras,
 		"shared":      data.Shared,
 	}}
 

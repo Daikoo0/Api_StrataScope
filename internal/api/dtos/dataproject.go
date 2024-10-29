@@ -55,6 +55,13 @@ type AddFosil struct {
 	X        float32 `json:"x"`
 }
 
+type addMuestra struct {
+	Upper       int     `json:"upper"`
+	Lower       int     `json:"lower"`
+	MuestraText string  `json:"muestraText"`
+	X           float32 `json:"x"`
+}
+
 type EditFosil struct {
 	IdFosil  string  `json:"idFosil"`
 	Upper    int     `json:"upper"`
@@ -63,8 +70,20 @@ type EditFosil struct {
 	X        float32 `json:"x"`
 }
 
+type EditMuestra struct {
+	IdMuestra   string  `json:"idMuestra"`
+	Upper       int     `json:"upper"`
+	Lower       int     `json:"lower"`
+	MuestraText string  `json:"muestraText"`
+	X           float32 `json:"x"`
+}
+
 type DeleteFosil struct {
 	IdFosil string `json:"idFosil"`
+}
+
+type DeleteMuestra struct {
+	IdMuestra string `json:"idMuestra"`
 }
 
 type Column struct {
