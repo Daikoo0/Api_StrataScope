@@ -212,7 +212,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 					conn.Close() // Cerrar la conexión si falla
 					return
 				}
-				log.Println("Ping sent to client")
+				// log.Println("Ping sent to client")
 			}
 		}()
 
@@ -813,36 +813,6 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 
 					a.save(proyect)
 
-					// case "columns":
-					// 	var column dtos.Column
-					// 	err := json.Unmarshal(dataMap.Data, &column)
-					// 	if err != nil {
-					// 		log.Println("Error deserializando columna:", err)
-					// 		break
-					// 	}
-					// 	// datos := rooms[roomID].Config["columns"].(map[string]interface{})
-					// 	datos := rooms[roomID].Config.Columns
-					// 	datos[column.Column] = column.IsVisible
-
-					// 	// Crear un slice para almacenar las columnas ordenadas
-					// 	//orderedColumns := make([]interface{}, len(orden))
-					// 	var orderedVisibleColumns []string
-
-					// 	// Llenar el slice con los datos de las columnas en el orden correcto
-					// 	for _, colName := range orden {
-					// 		if isVisible, ok := datos[colName]; ok && isVisible {
-					// 			// Si la columna es visible (IsVisible == true), agregar su nombre al slice.
-					// 			orderedVisibleColumns = append(orderedVisibleColumns, colName)
-					// 		}
-					// 	}
-
-					// 	msgData := map[string]interface{}{
-					// 		"action":  "columns",
-					// 		"columns": orderedVisibleColumns,
-					// 	}
-
-					// 	sendSocketMessage(msgData, proyect, "columns")
-
 				}
 				proyect.mu.Unlock()
 			} else {
@@ -1270,13 +1240,52 @@ func isInverted(project *RoomData, dataMap GeneralMessage) {
 
 	project.Config.IsInverted = isInverted.IsInverted
 
+	project.UpdateCoord(project.GetSizeRoom())
+
 	msgData := map[string]interface{}{
 		"action":     "isInverted",
 		"isInverted": isInverted.IsInverted,
+		"facies":     project.Facies,
+		"fosil":      project.Fosil,
+		"muestras":   project.Muestras,
 	}
 
 	sendSocketMessage(msgData, project, "isInverted")
 
+}
+
+func (r *RoomData) GetSizeRoom() int {
+	var height int
+	for _, Lit := range r.Data {
+		height += Lit.Litologia.Height
+	}
+
+	return height
+}
+
+func (room *RoomData) UpdateCoord(totalHeight int) {
+
+	for key, fosil := range room.Fosil {
+		fosil.Upper = totalHeight - fosil.Upper
+		fosil.Lower = totalHeight - fosil.Lower
+		room.Fosil[key] = fosil
+	}
+
+	for key, sections := range room.Facies {
+		for i := range sections {
+			oldY1 := sections[i].Y1
+			oldY2 := sections[i].Y2
+			sections[i].Y1 = float32(totalHeight) - oldY2
+			sections[i].Y2 = float32(totalHeight) - oldY1
+		}
+		room.Facies[key] = sections
+	}
+
+	for key, muestra := range room.Muestras {
+		muestra.Upper = int(totalHeight) - muestra.Upper
+		muestra.Lower = int(totalHeight) - muestra.Lower
+		room.Muestras[key] = muestra
+	}
 }
 
 func (a *API) save(project *RoomData) {
