@@ -79,7 +79,9 @@ type RoomData struct {
 	actionsCounter int
 }
 
-var rooms = make(map[string]*RoomData)
+var rooms sync.Map
+
+// var rooms = make(map[string]*RoomData)
 
 var roomActionsThreshold = 30
 
@@ -110,11 +112,12 @@ func RemoveElement(a *API, ctx context.Context, roomID string, userID string, pr
 
 		log.Println("Project saved: ", project.ID)
 
-		delete(rooms, roomID)
+		// delete(rooms, roomID)
+		rooms.Delete(roomID)
 		log.Println("Deleted room: ", roomID)
 	}
 
-	log.Print(rooms)
+	// log.Print(rooms)
 }
 
 func (a *API) HandleWebSocket(c echo.Context) error {
@@ -180,7 +183,8 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 			log.Printf("Recovered from panic: %v", r)
 			conn.WriteJSON(ErrorMessage{Action: "error", Message: "Internal server error"})
 			proyect.DisconnectUsers()
-			delete(rooms, roomID)
+			rooms.Delete(roomID)
+			// delete(rooms, roomID)
 		}
 	}()
 
@@ -192,8 +196,8 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 
 		proyect.AddUser(conn, user, userID)
 		sendSocketMessage(map[string]interface{}{"action": "userConnected", "id": userID, "mail": user, "color": proyect.Active[userID].Color}, proyect, "userConnected")
-		log.Println("\033[36m User connected: ", user, "\033[0m")
-		log.Println("Permissions: ", permission)
+		// log de usuario conectado y permisos
+		log.Println("\033[36m User connected: ", user, " permission: ", permission, "\033[0m")
 
 		// Iniciar el ticker de ping
 		ticker := time.NewTicker(30 * time.Second)
@@ -255,14 +259,14 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 								return
 							}
 
-							saveTimer.Reset(5 * time.Second)
+							saveTimer.Reset(5 * time.Minute)
 
 							proyect.mu.Lock()
 							proyect.actionsCounter++
 							proyect.mu.Unlock()
 						} else {
 							proyect.mu.Lock()
-							proyect.saveTimer = time.NewTimer(5 * time.Second)
+							proyect.saveTimer = time.NewTimer(5 * time.Minute)
 							proyect.actionsCounter = 1
 							proyect.mu.Unlock()
 
@@ -850,12 +854,12 @@ func sendSocketMessage(msgData map[string]interface{}, project *RoomData, action
 }
 
 func (a *API) instanceRoom(ctx context.Context, roomID string) *RoomData {
-
-	existingRoom, exists := rooms[roomID]
-	if exists {
-		return existingRoom
+	// Intenta cargar la sala existente desde sync.Map
+	if existingRoom, ok := rooms.Load(roomID); ok {
+		return existingRoom.(*RoomData)
 	}
 
+	// Si la sala no existe, se crea una nueva instancia de RoomData
 	room, err := a.repo.GetRoom(ctx, roomID)
 	if err != nil {
 		return nil
@@ -867,27 +871,52 @@ func (a *API) instanceRoom(ctx context.Context, roomID string) *RoomData {
 		Data:        room.Data,
 		Config:      room.Config,
 		Fosil:       room.Fosil,
-		Muestras:    room.Muestras,
 		Facies:      room.Facies,
+		Muestras:    room.Muestras,
 		Shared:      room.Shared,
 		Active:      make(map[string]*UserConnection),
 		undoStack:   make([]Action, 0),
 		redoStack:   make([]Action, 0),
 	}
 
-	rooms[roomID] = newRoom
-	return newRoom
+	// Almacena la nueva sala en el mapa si no existe (control de concurrencia)
+	actualRoom, loaded := rooms.LoadOrStore(roomID, newRoom)
+	if loaded {
+		return actualRoom.(*RoomData) // Si ya existe, usa la instancia creada por otro goroutine
+	}
+
+	return newRoom // Devuelve la nueva sala creada
 }
 
 func (a *API) HandleGetActiveProject(c echo.Context) error {
+	var activeRooms []map[string]interface{}
 
-	var keys []string
+	// Itera sobre las salas activas de manera segura
+	rooms.Range(func(key, value interface{}) bool {
+		room := value.(*RoomData)
+		room.mu.Lock()
+		defer room.mu.Unlock()
 
-	for key := range rooms {
-		keys = append(keys, key)
-	}
+		// Extrae los usuarios activos en esta sala
+		var users []map[string]string
+		for _, userConn := range room.Active {
+			users = append(users, map[string]string{
+				"email":   userConn.Email,
+				"editing": userConn.Editing,
+				"color":   userConn.Color,
+			})
+		}
 
-	return c.JSON(http.StatusOK, keys)
+		// Construye la representación de la sala actual
+		roomInfo := map[string]interface{}{
+			"roomID": key.(string),
+			"users":  users,
+		}
+		activeRooms = append(activeRooms, roomInfo)
+		return true
+	})
+
+	return c.JSON(http.StatusOK, activeRooms)
 }
 
 // Generar un color aleatorio en formato hexadecimal
@@ -1397,7 +1426,6 @@ func removeSharedPass(proyect *RoomData) {
 }
 
 func (a *API) ValidateInvitation(c echo.Context) error {
-
 	ctx, claimsAuth, err := a.getContextAndClaims(c)
 	if err != nil {
 		return a.handleError(c, http.StatusUnauthorized, err.Error())
@@ -1409,6 +1437,8 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 	if err := c.Bind(&requestBody); err != nil {
 		return a.handleError(c, http.StatusBadRequest, "Invalid request body")
 	}
+
+	// Verifica el token de invitación
 	claims, err := encryption.ParseInviteToken(requestBody.Token)
 	if err != nil {
 		return a.handleError(c, http.StatusUnauthorized, "Invalid or expired token link")
@@ -1417,14 +1447,22 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 	email := claimsAuth["email"].(string)
 	storedPass := claims.Pass
 
-	// Verificar si la sala está en memoria
-	existingRoom, exists := rooms[claims.RoomID]
+	// Acceso seguro a la sala usando sync.Map
+	roomInterface, exists := rooms.Load(claims.RoomID)
 	var members *models.Members
 	var pass string
+
 	if exists {
+		existingRoom := roomInterface.(*RoomData)
+
+		// Bloqueo de la sala para operaciones concurrentes internas
+		existingRoom.mu.Lock()
+		defer existingRoom.mu.Unlock()
+
 		members = &existingRoom.ProjectInfo.Members
 		pass = existingRoom.Shared.Pass
 	} else {
+		// Sala no está en memoria; accede a la base de datos para obtener miembros y pass
 		var err error
 		members, pass, err = a.repo.GetMembersAndPass(ctx, claims.RoomID)
 		if err != nil {
@@ -1432,23 +1470,26 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 		}
 	}
 
+	// Verifica la validez del token
 	if pass != storedPass {
 		return a.handleError(c, http.StatusUnauthorized, "Invalid or expired token link")
 	}
 
+	// Respuesta de éxito inicial
 	response := map[string]interface{}{
 		"status": "valid",
 		"roomID": claims.RoomID,
 		"role":   claims.Role,
 	}
 
-	// Usuario ya es miembro
+	// Comprueba si el usuario ya es miembro
 	if members.Owner == email || contains(members.Editors, email) || contains(members.Readers, email) {
 		return c.JSON(http.StatusOK, response)
 	}
 
-	// Si el usuario no es miembro, añadirlo
+	// Añadir al usuario como miembro si no existe
 	if exists {
+		existingRoom := roomInterface.(*RoomData)
 		switch claims.Role {
 		case "editors":
 			existingRoom.ProjectInfo.Members.Editors = append(existingRoom.ProjectInfo.Members.Editors, email)
@@ -1457,7 +1498,8 @@ func (a *API) ValidateInvitation(c echo.Context) error {
 		}
 	}
 
-	if err := a.repo.AddUserToProject(context.Background(), email, claims.Role, claims.RoomID); err != nil {
+	// Persistencia en la base de datos
+	if err := a.repo.AddUserToProject(ctx, email, claims.Role, claims.RoomID); err != nil {
 		return a.handleError(c, http.StatusInternalServerError, "Server error")
 	}
 
@@ -1518,7 +1560,7 @@ func (r *RoomData) DisconnectUser(userID string) error {
 		return fmt.Errorf("error closing connection: %w", err)
 	}
 
-	log.Println("User disconnected: ", client.Email)
+	log.Println("\033[35m User disconnected: ", client.Email, "\033[0m")
 	delete(r.Active, userID)
 	sendSocketMessage(map[string]interface{}{"action": "userDisconnected", "id": userID}, r, "userDisconnected")
 	return nil

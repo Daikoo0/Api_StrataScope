@@ -88,7 +88,6 @@ func (a *API) HandleCreateProyect(c echo.Context) error {
 }
 
 func (a *API) DeleteProject(c echo.Context) error {
-
 	ctx, claims, err := a.getContextAndClaims(c)
 	if err != nil {
 		return a.handleError(c, http.StatusUnauthorized, err.Error())
@@ -97,10 +96,13 @@ func (a *API) DeleteProject(c echo.Context) error {
 	user := claims["email"].(string)
 	id := c.Param("id")
 
-	existingRoom, exists := rooms[id]
+	roomInterface, exists := rooms.Load(id)
 	if exists {
-		if existingRoom.ProjectInfo.Members.Owner != user {
+		existingRoom := roomInterface.(*RoomData)
 
+		// Verificación de permisos del usuario
+		if existingRoom.ProjectInfo.Members.Owner != user {
+			// El usuario no es el dueño, solo se eliminará su acceso
 			existingRoom.ProjectInfo.Members.Editors = removeUser(existingRoom.ProjectInfo.Members.Editors, user)
 			existingRoom.ProjectInfo.Members.Readers = removeUser(existingRoom.ProjectInfo.Members.Readers, user)
 
@@ -108,8 +110,8 @@ func (a *API) DeleteProject(c echo.Context) error {
 			if err != nil {
 				return a.handleError(c, http.StatusInternalServerError, "Failed to delete user from room")
 			}
-
 		} else {
+			// El usuario es el dueño, se desconectan todos los usuarios y se elimina la sala
 			existingRoom.DisconnectUsers()
 
 			err = a.repo.DeleteProject(ctx, id)
@@ -117,19 +119,22 @@ func (a *API) DeleteProject(c echo.Context) error {
 				return a.handleError(c, http.StatusInternalServerError, "Failed to delete room")
 			}
 
-			delete(rooms, id)
+			rooms.Delete(id)
 		}
 	} else {
-		proyect, err := a.repo.GetMembers(ctx, id)
+		// La sala no está en memoria, verifica directamente en la base de datos
+		project, err := a.repo.GetMembers(ctx, id)
 		if err != nil {
 			return a.handleError(c, http.StatusNotFound, "Room not found")
 		}
 
-		if proyect.Owner != user {
+		if project.Owner != user {
+			// Si el usuario no es el dueño, solo elimina su acceso en la base de datos
 			if err = a.repo.DeleteUserRoom(ctx, user, id); err != nil {
 				return a.handleError(c, http.StatusInternalServerError, "Failed to delete user from room")
 			}
 		} else {
+			// Si el usuario es el dueño, elimina el proyecto de la base de datos
 			if err = a.repo.DeleteProject(ctx, id); err != nil {
 				return a.handleError(c, http.StatusInternalServerError, "Failed to delete room")
 			}

@@ -67,16 +67,15 @@ type DataInfo struct {
 }
 
 type LitologiaStruc struct {
-	ColorFill   string `json:"ColorFill"`
-	ColorStroke string `json:"ColorStroke"`
-	File        string `json:"File"`
-	Contact     string `json:"Contact"`
-	//PrevContact string        `json:"PrevContact"`
-	Zoom     int           `json:"Zoom"`
-	Rotation int           `json:"Rotation"`
-	Height   int           `json:"Height"`
-	Tension  float32       `json:"Tension"`
-	Circles  []CircleStruc `json:"Circles"`
+	ColorFill   string        `json:"ColorFill"`
+	ColorStroke string        `json:"ColorStroke"`
+	File        string        `json:"File"`
+	Contact     string        `json:"Contact"`
+	Zoom        int           `json:"Zoom"`
+	Rotation    int           `json:"Rotation"`
+	Height      int           `json:"Height"`
+	Tension     float32       `json:"Tension"`
+	Circles     []CircleStruc `json:"Circles"`
 }
 
 type CircleStruc struct {
