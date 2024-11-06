@@ -114,12 +114,13 @@ func (a *API) DeleteProject(c echo.Context) error {
 			// El usuario es el dueño, se desconectan todos los usuarios y se elimina la sala
 			existingRoom.DisconnectUsers()
 
+			rooms.Delete(id)
+
 			err = a.repo.DeleteProject(ctx, id)
 			if err != nil {
 				return a.handleError(c, http.StatusInternalServerError, "Failed to delete room")
 			}
 
-			rooms.Delete(id)
 		}
 	} else {
 		// La sala no está en memoria, verifica directamente en la base de datos

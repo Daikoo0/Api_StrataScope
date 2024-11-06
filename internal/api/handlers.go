@@ -85,17 +85,17 @@ var rooms sync.Map
 
 var roomActionsThreshold = 30
 
-func RemoveElement(a *API, ctx context.Context, roomID string, userID string, project *RoomData) {
+func RemoveElement(a *API, roomID string, userID string, project *RoomData) {
 
 	err := project.DisconnectUser(userID)
 	if err != nil {
-		log.Println("Error al desconectar el usuario:", err)
+		log.Println("Disconnect: ", err)
 		return
 	}
 
 	// Si no hay más usuarios conectados, guardar y eliminar la sala
 	if len(project.Active) == 0 {
-		err := a.repo.SaveRoom(ctx, models.Project{
+		err := a.repo.SaveRoom(context.Background(), models.Project{
 			ID:          project.ID,
 			ProjectInfo: project.ProjectInfo,
 			Data:        project.Data,
@@ -113,8 +113,8 @@ func RemoveElement(a *API, ctx context.Context, roomID string, userID string, pr
 		log.Println("Project saved: ", project.ID)
 
 		// delete(rooms, roomID)
-		rooms.Delete(roomID)
-		log.Println("Deleted room: ", roomID)
+		//rooms.Delete(roomID)
+		// log.Println("Deleted room: ", roomID)
 	}
 
 	// log.Print(rooms)
@@ -177,17 +177,6 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		return nil
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			log.Print("Error causado por: ", user)
-			log.Printf("Recovered from panic: %v", r)
-			conn.WriteJSON(ErrorMessage{Action: "error", Message: "Internal server error"})
-			proyect.DisconnectUsers()
-			rooms.Delete(roomID)
-			// delete(rooms, roomID)
-		}
-	}()
-
 	// orden := []string{"Sistema", "Edad", "Formacion", "Miembro", "Espesor", "Litologia", "Estructura fosil", "Facie", "AmbienteDepositacional", "Descripcion"}
 
 	dataRoom := proyect.DataProject()
@@ -199,24 +188,40 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		// log de usuario conectado y permisos
 		log.Println("\033[36m User connected: ", user, " permission: ", permission, "\033[0m")
 
-		// Iniciar el ticker de ping
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
 		// Configuramos el handler para manejar el "pong"
 		// conn.SetPongHandler(func(appData string) error {
+		// 	log.Println("Pong recibido de: ", user)
 		// 	return nil
 		// })
 
-		// Enviar "ping" periódicamente
 		go func() {
+			//Inicia el timer
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+
 			for range ticker.C {
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					// log.Println("Error sending ping:", err)
-					conn.Close() // Cerrar la conexión si falla
+					conn.Close()
+					if len(proyect.Active) == 0 {
+						_, exists := rooms.Load(roomID)
+						if exists {
+							rooms.Delete(roomID)
+							log.Println("Deleted room: ", roomID)
+						}
+					}
 					return
 				}
-				// log.Println("Ping sent to client")
+			}
+
+		}()
+
+		defer func() {
+			if r := recover(); r != nil {
+				log.Print("Error causado por: ", user)
+				log.Printf("Recovered from panic: %v", r)
+				conn.WriteJSON(ErrorMessage{Action: "error", Message: "Internal server error"})
+				proyect.DisconnectUsers()
+				rooms.Delete(roomID)
 			}
 		}()
 
@@ -826,7 +831,7 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 		}
 	}
 
-	RemoveElement(a, ctx, roomID, userID, proyect)
+	RemoveElement(a, roomID, userID, proyect)
 
 	return nil
 }
@@ -844,11 +849,7 @@ func sendSocketMessage(msgData map[string]interface{}, project *RoomData, action
 	}
 
 	for _, client := range project.Active {
-		err := client.Conn.WriteMessage(websocket.TextMessage, jsonMsg)
-		if err != nil {
-			log.Println("Error sending message:", err)
-			log.Println("Action:", action)
-		}
+		client.Conn.WriteMessage(websocket.TextMessage, jsonMsg)
 	}
 
 }
@@ -1534,10 +1535,7 @@ func (r *RoomData) DisconnectUsers() error {
 				return fmt.Errorf("error sending close message to user %s: %w", client.Email, err)
 			}
 
-			err = client.Conn.Close()
-			if err != nil {
-				return fmt.Errorf("error closing connection of user %s: %w", client.Email, err)
-			}
+			client.Conn.Close()
 		}
 	}
 
@@ -1555,10 +1553,7 @@ func (r *RoomData) DisconnectUser(userID string) error {
 		return fmt.Errorf("user %s not found", userID)
 	}
 
-	err := client.Conn.Close()
-	if err != nil {
-		return fmt.Errorf("error closing connection: %w", err)
-	}
+	client.Conn.Close()
 
 	log.Println("\033[35m User disconnected: ", client.Email, "\033[0m")
 	delete(r.Active, userID)
