@@ -25,3 +25,12 @@ type InviteRequest struct {
 	Email string `json:"email"`
 	Role  string `json:"role"`
 }
+
+type EditProfileRequest struct {
+	Name  string `json:"first_name" validate:"required"`
+	LastName   string `json:"last_name" validate:"required"`
+	Password string `bson:"password"`
+	NewPassword string `bson:"newPassword"validate:"required,min=8"`
+	NewPwConfirm string `bson:"newPwConfirm"validate:"required"`
+}
+

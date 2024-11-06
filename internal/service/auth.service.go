@@ -55,3 +55,5 @@ func (s *serv) LoginUser(ctx context.Context, email, password string) (*models.U
 		Name:  u.Name,
 	}, nil
 }
+
+

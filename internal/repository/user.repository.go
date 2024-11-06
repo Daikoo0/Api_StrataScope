@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/ProyectoT/api/encryption"
 )
 
 // Guarda un nuevo usuario
@@ -89,21 +90,48 @@ func (r *repo) DeleteUserRoom(ctx context.Context, email string, roomID string) 
 	return nil
 }
 
+
+
 // Actualiza el perfil de un usuario
 func (r *repo) UpdateUserProfile(ctx context.Context, edit dtos.EditProfileRequest, email string) error {
+	
+	u, err := r.GetUserByEmail(ctx, email)
+	if u == nil {
+		return err
+	}
+
+	bb, err := encryption.FromBase64(u.Password) // Transforma la contraseña de "et3L3evT" a [122 221 203 221 235]
+	if err != nil {
+		return err
+	}
+	decryptedPassword, err := encryption.Decrypt(bb) // Contraseña desencriptada
+	if err != nil {
+		return err
+	}
+	if string(decryptedPassword) != edit.Password { // verifica que la contraseña sea la misma
+		return errors.New("invalid credentials") // si no es la misma retorna error de credenciales invalidas
+	}
+
+	var finalPassword string
+	if edit.NewPassword != "" && edit.NewPassword == edit.NewPwConfirm { // Verifica que `newPassword` exista y coincida con `newPwConfirm`
+	pw, _ := encryption.FromBase64(edit.NewPassword)
+		finalPassword = string(pw) // Usa la nueva contraseña
+	} else {
+		finalPassword = string(bb) // Si no, mantiene la contraseña antigua
+	}
 
 	users := r.db.Collection("users")
 	filter := bson.M{"email": email}
 	update := bson.M{
 		"$set": bson.M{
-			"name":       edit.FirstName,
+			"email":      email,
+			"name":       edit.Name,
 			"lastName":   edit.LastName,
-			"profession": edit.Profession,
-			"bio":        edit.Bio,
+			"password" :  finalPassword,
 		},
 	}
 	opts := options.Update().SetUpsert(true)
-	_, err := users.UpdateOne(ctx, filter, update, opts)
+	_, err = users.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
 		log.Println("Error updating user profile:", err)
 		return err

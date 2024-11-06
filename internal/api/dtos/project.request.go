@@ -15,9 +15,11 @@ type Comment struct {
 	Labels    []string `bson:"labels"`
 }
 
+
 type EditProfileRequest struct {
-	FirstName  string `json:"first_name" validate:"required"`
+	Name  string `json:"first_name" validate:"required"`
 	LastName   string `json:"last_name" validate:"required"`
-	Profession string `json:"profession" validate:"required"`
-	Bio        string `json:"bio"`
+	Password string `bson:"password"`
+	NewPassword string `bson:"newPassword"`
+	NewPwConfirm string `bson:"newPwConfirm"`
 }
