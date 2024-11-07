@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 
 	"time"
 
@@ -764,6 +765,10 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 					if err != nil {
 						log.Println("Error deserializando columna:", err)
 						break
+					}
+
+					if strings.TrimSpace(column.Name)==""{
+					   break
 					}
 
 					column.Visible = true

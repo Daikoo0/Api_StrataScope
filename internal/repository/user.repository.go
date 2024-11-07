@@ -7,7 +7,6 @@ import (
 	"log"
 
 	"github.com/ProyectoT/api/encryption"
-	"github.com/ProyectoT/api/internal/api/dtos"
 	"github.com/ProyectoT/api/internal/entity"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -90,7 +89,7 @@ func (r *repo) DeleteUserRoom(ctx context.Context, email string, roomID string) 
 }
 
 // Actualiza el perfil de un usuario
-func (r *repo) UpdatePassword(ctx context.Context, edit dtos.EditPasswordRequest, email string) error {
+func (r *repo) UpdatePassword(ctx context.Context, edit entity.Password, email string) error {
 
 	u, err := r.GetUserByEmail(ctx, email)
 	if u == nil {
@@ -133,7 +132,7 @@ func (r *repo) UpdatePassword(ctx context.Context, edit dtos.EditPasswordRequest
 	opts := options.Update().SetUpsert(true)
 	_, err = users.UpdateOne(ctx, filter, update, opts)
 	if err != nil {
-		log.Println("Error updating user profile:", err)
+		log.Println("Error updating user password:", err)
 		return err
 	}
 

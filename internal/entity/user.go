@@ -14,3 +14,9 @@ type User struct {
 	Nationality string             `bson:"nationality" json:"nationality"`
 	Password    string             `bson:"password" json:"password"`
 }
+
+type Password struct {
+	Password string `bson:"password" json:"password"`
+	NewPassword string `bson:"password" json:"newPassword"`
+	NewPwConfirm string `bson:"password" json:"newPwConfirm"`
+}

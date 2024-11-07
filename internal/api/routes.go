@@ -14,6 +14,7 @@ func (a *API) RegisterRoutes(e *echo.Echo) {
 	users.DELETE("/projects/:id", a.DeleteProject) // users/projects/:id
 	users.GET("/me", a.HandleGetUser)              // users/me
 	users.POST("/editprofile", a.HandleEditProfile)
+	users.POST("/chagePassword",a.HandleEditPassword)
 
 	e.GET("/search/public", a.HandleGetPublicProject) // search/public
 	e.GET("/ws/:room", a.HandleWebSocket)             //ws/sala

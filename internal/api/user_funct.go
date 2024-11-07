@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/ProyectoT/api/encryption"
 	"github.com/ProyectoT/api/internal/api/dtos"
@@ -187,6 +188,32 @@ func (a *API) HandleEditProfile(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, responseMessage{Message: "Profile updated successfully"})
 }
+
+func (a *API) HandleEditPassword(c echo.Context) error {
+	ctx, claims, err := a.getContextAndClaims(c)
+	if err != nil {
+		return a.handleError(c, http.StatusUnauthorized, err.Error())
+	}
+
+	email := claims["email"].(string)
+
+	var req entity.Password
+	if err := c.Bind(&req); err != nil {
+		return a.handleError(c, http.StatusBadRequest, "Invalid request")
+	}
+
+	if strings.TrimSpace(req.Password) == ""|| strings.TrimSpace(req.NewPassword) == "" || strings.TrimSpace(req.NewPwConfirm) == ""  {
+		return a.handleError(c, http.StatusBadRequest, "All fields are required")
+	}
+
+	if err = a.repo.UpdatePassword(ctx, req, email); err != nil {
+		return a.handleError(c, http.StatusInternalServerError, "Failed to update profile")
+	}
+
+	return c.JSON(http.StatusOK, responseMessage{Message: "Profile updated successfully"})
+}
+
+
 
 func removeUser(users []string, userToRemove string) []string {
 	for i, u := range users {

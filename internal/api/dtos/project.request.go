@@ -14,9 +14,3 @@ type Comment struct {
 	CreatedAt string   `bson:"createdAt"`
 	Labels    []string `bson:"labels"`
 }
-
-type EditPasswordRequest struct {
-	Password     string `bson:"password"`
-	NewPassword  string `bson:"newPassword"`
-	NewPwConfirm string `bson:"newPwConfirm"`
-}
