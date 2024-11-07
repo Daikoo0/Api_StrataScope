@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/ProyectoT/api/encryption"
 	"github.com/ProyectoT/api/internal/api/dtos"
 	"github.com/ProyectoT/api/internal/entity"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"github.com/ProyectoT/api/encryption"
 )
 
 // Guarda un nuevo usuario
@@ -22,7 +22,6 @@ func (r *repo) SaveUser(ctx context.Context, email, name, lastname, password str
 		Name:     name,
 		LastName: lastname,
 		Password: password,
-		Proyects: []string{},
 	}
 
 	users := r.db.Collection("users")
@@ -90,11 +89,9 @@ func (r *repo) DeleteUserRoom(ctx context.Context, email string, roomID string) 
 	return nil
 }
 
-
-
 // Actualiza el perfil de un usuario
-func (r *repo) UpdateUserProfile(ctx context.Context, edit dtos.EditProfileRequest, email string) error {
-	
+func (r *repo) UpdatePassword(ctx context.Context, edit dtos.EditPasswordRequest, email string) error {
+
 	u, err := r.GetUserByEmail(ctx, email)
 	if u == nil {
 		return err
@@ -114,20 +111,23 @@ func (r *repo) UpdateUserProfile(ctx context.Context, edit dtos.EditProfileReque
 
 	var finalPassword string
 	if edit.NewPassword != "" && edit.NewPassword == edit.NewPwConfirm { // Verifica que `newPassword` exista y coincida con `newPwConfirm`
-	pw, _ := encryption.FromBase64(edit.NewPassword)
-		finalPassword = string(pw) // Usa la nueva contraseña
+		finalPassword = string(edit.NewPassword) // Usa la nueva contraseña
 	} else {
-		finalPassword = string(bb) // Si no, mantiene la contraseña antigua
+		finalPassword = string(decryptedPassword) // Si no, mantiene la contraseña antigua
 	}
+
+	dPassword, err := encryption.Encrypt([]byte(finalPassword))
+	if err != nil {
+		return err
+	}
+
+	definitivePassword := encryption.ToBase64(dPassword)
 
 	users := r.db.Collection("users")
 	filter := bson.M{"email": email}
 	update := bson.M{
 		"$set": bson.M{
-			"email":      email,
-			"name":       edit.Name,
-			"lastName":   edit.LastName,
-			"password" :  finalPassword,
+			"password": definitivePassword,
 		},
 	}
 	opts := options.Update().SetUpsert(true)
@@ -139,4 +139,30 @@ func (r *repo) UpdateUserProfile(ctx context.Context, edit dtos.EditProfileReque
 
 	return nil
 
+}
+
+func (r *repo) UpdateUserProfile(ctx context.Context, edit entity.User, email string) error {
+
+	users := r.db.Collection("users")
+	filter := bson.M{"email": email}
+
+	update := bson.M{
+		"$set": bson.M{
+			"name":        edit.Name,
+			"lastName":    edit.LastName,
+			"age":         edit.Age,
+			"gender":      edit.Gender,
+			"nationality": edit.Nationality,
+		},
+	}
+
+	opts := options.Update().SetUpsert(true)
+
+	_, err := users.UpdateOne(ctx, filter, update, opts)
+	if err != nil {
+		log.Println("Error updating user profile:", err)
+		return err
+	}
+
+	return nil
 }

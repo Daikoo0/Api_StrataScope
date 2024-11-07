@@ -5,10 +5,12 @@ import (
 )
 
 type User struct {
-	ID       primitive.ObjectID `bson:"_id,omitempty"`
-	Email    string             `bson:"email"`
-	Name     string             `bson:"name"`
-	LastName string             `bson:"lastName"`
-	Password string             `bson:"password"`
-	Proyects []string           `bson:"proyects"`
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	Email       string             `bson:"email" json:"email"`
+	Name        string             `bson:"name" json:"name"`
+	LastName    string             `bson:"lastName" json:"lastName"`
+	Age         int                `bson:"age" json:"age"`
+	Gender      string             `bson:"gender" json:"gender"`
+	Nationality string             `bson:"nationality" json:"nationality"`
+	Password    string             `bson:"password" json:"password"`
 }

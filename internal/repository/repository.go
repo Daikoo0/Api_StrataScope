@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 
-	"github.com/ProyectoT/api/internal/api/dtos"
 	"github.com/ProyectoT/api/internal/entity"
 	"github.com/ProyectoT/api/internal/models"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -34,7 +33,7 @@ type Repository interface { //comunicaciones con la base de datos
 	SaveUser(ctx context.Context, email, name, lastname, password string) error // Guarda un usuario en la base de datos
 	GetUserByEmail(ctx context.Context, email string) (*entity.User, error)     // Devuelve la entidad usuario (OBJID, email, name, password, proyects)
 	DeleteUserRoom(ctx context.Context, email string, roomName string) error    // Elimina un usuario de una sala
-	UpdateUserProfile(ctx context.Context, edit dtos.EditProfileRequest, email string) error
+	UpdateUserProfile(ctx context.Context, edit entity.User, email string) error
 
 	// Comments - comments.repository.go
 	HandleAddComment(ctx context.Context, comment models.Comment) error

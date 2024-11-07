@@ -77,3 +77,22 @@ func (a *API) LoginUser(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]string{"token": token}) // HTTP 200 OK
 }
+
+// HandleGetUser devuelve los datos del usuario autenticado
+func (a *API) HandleGetUser(c echo.Context) error {
+	ctx, claims, err := a.getContextAndClaims(c)
+	if err != nil {
+		return a.handleError(c, http.StatusUnauthorized, err.Error())
+	}
+
+	user := claims["email"].(string)
+
+	u, err := a.repo.GetUserByEmail(ctx, user)
+	if err != nil {
+		return a.handleError(c, http.StatusInternalServerError, "Failed to get user")
+	}
+
+	u.Password = "" // No se envía la contraseña
+
+	return c.JSON(http.StatusOK, u)
+}

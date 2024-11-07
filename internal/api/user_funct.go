@@ -9,6 +9,7 @@ import (
 
 	"github.com/ProyectoT/api/encryption"
 	"github.com/ProyectoT/api/internal/api/dtos"
+	"github.com/ProyectoT/api/internal/entity"
 	"github.com/ProyectoT/api/internal/models"
 	"github.com/labstack/echo/v4"
 )
@@ -171,13 +172,13 @@ func (a *API) HandleEditProfile(c echo.Context) error {
 
 	email := claims["email"].(string)
 
-	var req dtos.EditProfileRequest
+	var req entity.User
 	if err := c.Bind(&req); err != nil {
 		return a.handleError(c, http.StatusBadRequest, "Invalid request")
 	}
 
-	if err := a.dataValidator.Struct(req); err != nil {
-		return a.handleError(c, http.StatusBadRequest, err.Error())
+	if req.Name == "" || req.LastName == "" || req.Age == 0 || req.Gender == "" || req.Nationality == "" {
+		return a.handleError(c, http.StatusBadRequest, "All fields are required")
 	}
 
 	if err = a.repo.UpdateUserProfile(ctx, req, email); err != nil {
