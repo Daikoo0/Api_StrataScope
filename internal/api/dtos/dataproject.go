@@ -9,8 +9,8 @@ type EditText struct {
 
 // Case add
 type Add struct {
-	RowIndex int `json:"rowIndex"`
-	Height   int `json:"height"`
+	RowIndex int     `json:"rowIndex"`
+	Height   float32 `json:"height"`
 }
 
 // Case delete
@@ -55,25 +55,18 @@ type AddFosil struct {
 	X        float32 `json:"x"`
 }
 
-type addMuestra struct {
-	Upper       int     `json:"upper"`
-	Lower       int     `json:"lower"`
-	MuestraText string  `json:"muestraText"`
-	X           float32 `json:"x"`
-}
-
 type EditFosil struct {
 	IdFosil  string  `json:"idFosil"`
-	Upper    int     `json:"upper"`
-	Lower    int     `json:"lower"`
+	Upper    float32 `json:"upper"`
+	Lower    float32 `json:"lower"`
 	FosilImg string  `json:"fosilImg"`
 	X        float32 `json:"x"`
 }
 
 type EditMuestra struct {
 	IdMuestra   string  `json:"idMuestra"`
-	Upper       int     `json:"upper"`
-	Lower       int     `json:"lower"`
+	Upper       float32 `json:"upper"`
+	Lower       float32 `json:"lower"`
 	MuestraText string  `json:"muestraText"`
 	X           float32 `json:"x"`
 }
@@ -125,4 +118,11 @@ type AddFacieSection struct {
 type DeleteFacieSection struct {
 	Facie string `json:"facie"`
 	Index int    `json:"index"`
+}
+
+type EditInfoProject struct {
+	Name        string `json:"Name"`
+	Location    string `json:"Location"`
+	Visible     bool   `json:"Visible"`
+	Description string `json:"Description"`
 }

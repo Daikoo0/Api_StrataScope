@@ -73,7 +73,7 @@ type LitologiaStruc struct {
 	Contact     string        `json:"Contact"`
 	Zoom        int           `json:"Zoom"`
 	Rotation    int           `json:"Rotation"`
-	Height      int           `json:"Height"`
+	Height      float32       `json:"Height"`
 	Tension     float32       `json:"Tension"`
 	Circles     []CircleStruc `json:"Circles"`
 }
@@ -92,19 +92,19 @@ type FaciesSection struct {
 }
 
 type Fosil struct {
-	Upper    int     `json:"upper"`
-	Lower    int     `json:"lower"`
+	Upper    float32 `json:"upper"`
+	Lower    float32 `json:"lower"`
 	FosilImg string  `json:"fosilImg"`
 	X        float32 `json:"x"`
 }
 type Muestra struct {
-	Upper       int     `json:"upper"`
-	Lower       int     `json:"lower"`
+	Upper       float32 `json:"upper"`
+	Lower       float32 `json:"lower"`
 	MuestraText string  `json:"muestraText"`
 	X           float32 `json:"x"`
 }
 
-func NewFosil(upper int, lower int, fosilImg string, x float32) Fosil {
+func NewFosil(upper float32, lower float32, fosilImg string, x float32) Fosil {
 	return Fosil{
 		Upper:    upper,
 		Lower:    lower,
@@ -113,7 +113,7 @@ func NewFosil(upper int, lower int, fosilImg string, x float32) Fosil {
 	}
 }
 
-func NewMuestra(upper int, lower int, muestraText string, x float32) Muestra {
+func NewMuestra(upper float32, lower float32, muestraText string, x float32) Muestra {
 	return Muestra{
 		Upper:       upper,
 		Lower:       lower,

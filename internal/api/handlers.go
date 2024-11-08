@@ -313,6 +313,16 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 
 					generateTokenLink(conn, roomID, user, proyect)
 
+				case "infoP":
+					var dataP dtos.EditInfoProject
+					err := json.Unmarshal(dataMap.Data, &dataP)
+					if err != nil {
+						log.Println("Error", err)
+						break
+					}
+
+					proyect.editInfoProject(dataP)
+
 				case "editingUser":
 
 					var editing dtos.UserEditingState
@@ -767,8 +777,8 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 						break
 					}
 
-					if strings.TrimSpace(column.Name)==""{
-					   break
+					if strings.TrimSpace(column.Name) == "" {
+						break
 					}
 
 					column.Visible = true
@@ -1289,8 +1299,8 @@ func isInverted(project *RoomData, dataMap GeneralMessage) {
 
 }
 
-func (r *RoomData) GetSizeRoom() int {
-	var height int
+func (r *RoomData) GetSizeRoom() float32 {
+	var height float32
 	for _, Lit := range r.Data {
 		height += Lit.Litologia.Height
 	}
@@ -1298,7 +1308,7 @@ func (r *RoomData) GetSizeRoom() int {
 	return height
 }
 
-func (room *RoomData) UpdateCoord(totalHeight int) {
+func (room *RoomData) UpdateCoord(totalHeight float32) {
 
 	for key, fosil := range room.Fosil {
 		fosil.Upper = totalHeight - fosil.Upper
@@ -1310,15 +1320,15 @@ func (room *RoomData) UpdateCoord(totalHeight int) {
 		for i := range sections {
 			oldY1 := sections[i].Y1
 			oldY2 := sections[i].Y2
-			sections[i].Y1 = float32(totalHeight) - oldY2
-			sections[i].Y2 = float32(totalHeight) - oldY1
+			sections[i].Y1 = totalHeight - oldY2
+			sections[i].Y2 = totalHeight - oldY1
 		}
 		room.Facies[key] = sections
 	}
 
 	for key, muestra := range room.Muestras {
-		muestra.Upper = int(totalHeight) - muestra.Upper
-		muestra.Lower = int(totalHeight) - muestra.Lower
+		muestra.Upper = totalHeight - muestra.Upper
+		muestra.Lower = totalHeight - muestra.Lower
 		room.Muestras[key] = muestra
 	}
 }
@@ -1612,4 +1622,21 @@ func (r *RoomData) DataProject() map[string]interface{} {
 	}
 
 	return dataRoom
+}
+
+func (r *RoomData) editInfoProject(dataInfo dtos.EditInfoProject) {
+
+	project := &r.ProjectInfo
+
+	project.Name = dataInfo.Name
+	project.Description = dataInfo.Description
+	project.Location = dataInfo.Location
+	project.Visible = dataInfo.Visible
+
+	msgData := map[string]interface{}{
+		"action":      "infoP",
+		"projectInfo": project,
+	}
+
+	sendSocketMessage(msgData, r, "infoP")
 }

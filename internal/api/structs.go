@@ -57,6 +57,25 @@ func GetFieldString(data interface{}, campo string) string {
 	}
 }
 
+func UpdateFieldProject(roomData *models.ProjectInfo, field string, value string) {
+	switch field {
+	case "Description":
+		roomData.Description = value
+	case "Name":
+		roomData.Name = value
+	case "Location":
+		roomData.Location = value
+	case "Visible":
+		if v, err := strconv.ParseBool(value); err == nil {
+			roomData.Visible = v
+		} else {
+			fmt.Println("Valor inválido para Visible")
+		}
+	default:
+		fmt.Println("Campo no reconocido")
+	}
+}
+
 func UpdateFieldLit(litologia *models.LitologiaStruc, field string, value interface{}) {
 	switch field {
 	case "ColorFill":
@@ -108,10 +127,10 @@ func UpdateFieldLit(litologia *models.LitologiaStruc, field string, value interf
 			fmt.Println("Valor inválido para File")
 		}
 	case "Height":
-		if v, ok := value.(int); ok {
+		if v, ok := value.(float32); ok {
 			litologia.Height = v
-		} else if v, err := strconv.Atoi(value.(string)); err == nil {
-			litologia.Height = v
+		} else if v, err := strconv.ParseFloat(value.(string), 32); err == nil {
+			litologia.Height = float32(v)
 		} else {
 			fmt.Println("Valor inválido para Height")
 		}
