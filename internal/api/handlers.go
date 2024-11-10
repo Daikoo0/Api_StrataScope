@@ -833,6 +833,53 @@ func (a *API) HandleWebSocket(c echo.Context) error {
 
 					isInverted(proyect, dataMap)
 
+				case "toggleColumn":
+					var column dtos.Column
+					err := json.Unmarshal(dataMap.Data, &column)
+					if err != nil {
+						log.Println("Error deserializando columna:", err)
+						break
+					}
+
+					for i, col := range proyect.Config.Columns {
+						if col.Name == column.Column {
+							proyect.Config.Columns[i].Visible = !proyect.Config.Columns[i].Visible
+							break
+						}
+					}
+
+					sendSocketMessage(map[string]interface{}{
+						"action": "toggleColumn",
+						"column": column.Column,
+					}, proyect, "toggleColumn")
+
+				case "MoveColumn":
+					var drop dtos.Drop
+					err := json.Unmarshal(dataMap.Data, &drop)
+					if err != nil {
+						log.Println("Error al deserializar: ", err)
+					}
+
+					activeId := drop.ActiveId
+					overId := drop.OverId
+
+					roomData := proyect.Config.Columns
+
+					if activeId < 0 || activeId >= len(roomData) || overId < 0 || overId >= len(roomData) {
+						log.Println("Índice fuera de los límites")
+						break
+					}
+
+					arrayMove(roomData, activeId, overId)
+
+					msgData := map[string]interface{}{
+						"action":   "MoveColumn",
+						"activeId": activeId,
+						"overId":   overId,
+					}
+
+					sendSocketMessage(msgData, proyect, "MoveColumn")
+
 				case "save":
 
 					a.save(proyect)
@@ -948,6 +995,24 @@ func generateRandomPass(n int) (string, error) {
 		return "", fmt.Errorf("error generando pass aleatorio: %w", err)
 	}
 	return hex.EncodeToString(bytes), nil
+}
+
+func arrayMove[T any](slice []T, fromIndex, toIndex int) {
+	if fromIndex < 0 || fromIndex >= len(slice) || toIndex < 0 || toIndex >= len(slice) {
+		log.Println("Índice fuera de los límites")
+		return
+	}
+
+	item := slice[fromIndex]
+
+	if fromIndex < toIndex {
+		copy(slice[fromIndex:], slice[fromIndex+1:toIndex+1])
+	} else {
+		copy(slice[toIndex+1:], slice[toIndex:fromIndex])
+	}
+
+	slice[toIndex] = item
+
 }
 
 func añadir(project *RoomData, addData dtos.Add, newShape models.DataInfo) {
@@ -1223,7 +1288,7 @@ func layerDrop(project *RoomData, activeId int, overId int) {
 
 	roomData := project.Data
 
-	roomData[activeId], roomData[overId] = roomData[overId], roomData[activeId]
+	arrayMove(roomData, activeId, overId)
 
 	msgData := map[string]interface{}{
 		"action":   "drop",
