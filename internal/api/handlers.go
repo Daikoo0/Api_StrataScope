@@ -956,13 +956,21 @@ func (a *API) HandleGetActiveProject(c echo.Context) error {
 
 	// Itera sobre las salas activas de manera segura
 	rooms.Range(func(key, value interface{}) bool {
-		room := value.(*RoomData)
-		room.mu.Lock()
-		defer room.mu.Unlock()
+		if c.Request().Context().Err() != nil {
+			return false // Detiene la iteración si la solicitud ha sido cancelada
+		}
 
-		// Extrae los usuarios activos en esta sala
-		var users []map[string]string
-		for _, userConn := range room.Active {
+		room, ok := value.(*RoomData)
+		if !ok {
+			return true // Continúa con la siguiente iteración si el valor no es de tipo RoomData
+		}
+
+		room.mu.Lock()
+		activeUsers := room.Active
+		room.mu.Unlock() // Desbloquea lo antes posible
+
+		users := make([]map[string]string, 0, len(activeUsers))
+		for _, userConn := range activeUsers {
 			users = append(users, map[string]string{
 				"email":   userConn.Email,
 				"editing": userConn.Editing,
