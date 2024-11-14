@@ -962,15 +962,38 @@ func (a *API) HandleGetActiveProject(c echo.Context) error {
 
 		room, ok := value.(*RoomData)
 		if !ok {
-			return true // Continúa con la siguiente iteración si el valor no es de tipo RoomData
+			return true // Continua si el valor no es de tipo RoomData
 		}
 
-		room.mu.Lock()
-		activeUsers := room.Active
-		room.mu.Unlock() // Desbloquea lo antes posible
+		var activeUsersCopy map[string]*UserConnection
 
-		users := make([]map[string]string, 0, len(activeUsers))
-		for _, userConn := range activeUsers {
+		// Intentamos leer `room.Active` sin bloqueo y recuperamos si ocurre un error
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Si ocurre un panic, simplemente continuamos
+					activeUsersCopy = nil
+				}
+			}()
+
+			// Intentamos hacer una copia de `room.Active` sin `mutex`
+			activeUsersCopy = make(map[string]*UserConnection, len(room.Active))
+			for k, v := range room.Active {
+				activeUsersCopy[k] = &UserConnection{
+					Email:   v.Email,
+					Editing: v.Editing,
+					Color:   v.Color,
+				}
+			}
+		}()
+
+		// Si falló la copia, continuamos a la siguiente iteración
+		if activeUsersCopy == nil {
+			return true
+		}
+
+		users := make([]map[string]string, 0, len(activeUsersCopy))
+		for _, userConn := range activeUsersCopy {
 			users = append(users, map[string]string{
 				"email":   userConn.Email,
 				"editing": userConn.Editing,
@@ -978,7 +1001,6 @@ func (a *API) HandleGetActiveProject(c echo.Context) error {
 			})
 		}
 
-		// Construye la representación de la sala actual
 		roomInfo := map[string]interface{}{
 			"roomID": key.(string),
 			"users":  users,
